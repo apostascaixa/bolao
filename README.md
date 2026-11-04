@@ -4,12 +4,14 @@ Sistema de organização de bolão em grupo. Não é um canal oficial de apostas
 
 ## Estrutura
 - `shared/` regras das modalidades, rateio e geração de PIX (testados)
-- `backend/` código do Apps Script (próxima etapa)
+- `backend/src/` código do Apps Script em partes; `backend/Codigo.gs` é o arquivo gerado (único) que se cola no Apps Script
 - `frontend/` telas publicadas no Netlify (próxima etapa)
 - `tests/` testes automatizados
 
-## Testes
-Requer Node 18 ou superior: `npm test`
+## Testes e build
+Requer Node 18 ou superior.
+- `npm test` roda todos os testes
+- `npm run build` regenera `backend/Codigo.gs` (rode sempre que mudar `shared/` ou `backend/src/`)
 
 ## Segurança
 Repositório público. Nunca versionar chave PIX, senhas ou dados de participantes.

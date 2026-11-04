@@ -3,5 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "description": "Organizador de bolão (Google Planilhas, Drive e Netlify)",
-  "scripts": { "test": "node --test tests/shared.test.js" }
+  "scripts": { "test": "node --test tests/shared.test.js tests/backend.test.js",
+    "build": "node scripts/build-backend.js" }
 }
