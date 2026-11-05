@@ -19,6 +19,9 @@
     return e;
   }
 
+  var diferencaRelogio = 0; // horário do servidor menos o do aparelho (para o cronômetro)
+  function agoraServidor() { return Date.now() + diferencaRelogio; }
+
   async function chamar(acao, dados) {
     var url = (root.BOLAO_CONFIG || {}).API_URL;
     var corpo = Object.assign({}, dados || {}, { acao: acao });
@@ -38,6 +41,7 @@
     }
     var json;
     try { json = await resp.json(); } catch (e) { throw ErroApi('Resposta inesperada do servidor.'); }
+    if (json && typeof json.agora === 'number') diferencaRelogio = json.agora - Date.now();
     if (!json || !json.ok) {
       var msg = (json && json.erro) || 'Erro desconhecido.';
       throw ErroApi(msg, /^Sessão inválida/.test(msg));
@@ -45,5 +49,5 @@
     return json.dados;
   }
 
-  root.BolaoApi = { chamar: chamar, lerToken: lerToken, guardarToken: guardarToken };
+  root.BolaoApi = { chamar: chamar, lerToken: lerToken, guardarToken: guardarToken, agoraServidor: agoraServidor };
 })(window);

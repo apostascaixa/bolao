@@ -6,7 +6,8 @@
 
   var estado = {
     usuario: null, abaAcesso: 'entrar', codigoConvite: '', aba: 'boloes',
-    boloes: [], convites: [], modalidades: [], edicao: null, novoConvite: null
+    boloes: [], convites: [], modalidades: [], edicao: null, novoConvite: null,
+    abertos: [], minhasCotas: [], bolaoSel: null, volante: { sel: [], editando: null }, verMinhas: false, menuAberto: false
   };
 
   // ---------- utilitários de tela ----------
@@ -142,7 +143,9 @@
   async function abrirPainel(r) {
     API.guardarToken(r.token);
     estado.usuario = r.usuario;
-    estado.aba = 'boloes';
+    estado.aba = r.usuario.papel === 'admin' ? 'boloes' : 'participar';
+    estado.verMinhas = false;
+    estado.menuAberto = false;
     estado.edicao = null;
     estado.novoConvite = null;
     await carregarDados();
@@ -150,14 +153,12 @@
   }
 
   async function carregarDados() {
-    if (estado.usuario.papel === 'admin') {
-      var r = await Promise.all([
-        API.chamar('admin.boloes.listar', {}), API.chamar('admin.convites.listar', {}), API.chamar('modalidades', {})
-      ]);
-      estado.boloes = r[0]; estado.convites = r[1]; estado.modalidades = r[2];
-    } else {
-      estado.boloes = await API.chamar('boloes.abertos', {});
-    }
+    var admin = estado.usuario.papel === 'admin';
+    var reqs = [API.chamar('boloes.abertos', {}), API.chamar('cotas.minhas', {}), API.chamar('modalidades', {})];
+    if (admin) { reqs.push(API.chamar('admin.boloes.listar', {})); reqs.push(API.chamar('admin.convites.listar', {})); }
+    var r = await Promise.all(reqs);
+    estado.abertos = r[0]; estado.minhasCotas = r[1]; estado.modalidades = r[2];
+    if (admin) { estado.boloes = r[3]; estado.convites = r[4]; }
   }
 
   async function sair() {
@@ -172,11 +173,12 @@
   function renderPainel() {
     var admin = estado.usuario.papel === 'admin';
     var abas = admin
-      ? [['boloes', 'Bolões'], ['convites', 'Convites']]
-      : [['boloes', 'Bolões abertos']];
+      ? [['boloes', 'Administrar bolões'], ['convites', 'Convites'], ['participar', 'Participar']]
+      : [];
     var conteudo;
     if (estado.aba === 'convites' && admin) conteudo = telaConvites();
-    else conteudo = admin ? telaBoloesAdmin() : telaBoloesParticipante();
+    else if (estado.aba === 'boloes' && admin) conteudo = telaBoloesAdmin();
+    else conteudo = telaParticipar();
 
     montar(
       h('header', { class: 'topo' },
@@ -184,7 +186,7 @@
         h('span', { class: 'quem' }, estado.usuario.nome + (admin ? ' (administrador)' : '')),
         h('button', { class: 'link', onclick: sair }, 'Sair')),
       h('main', { class: 'painel' },
-        abas.length > 1 ? h('div', { class: 'abas', role: 'tablist' }, abas.map(function (a) {
+        abas.length > 0 ? h('div', { class: 'abas', role: 'tablist' }, abas.map(function (a) {
           var ativa = estado.aba === a[0];
           return h('button', { role: 'tab', 'aria-selected': String(ativa), class: ativa ? 'ativa' : '',
             onclick: function () { estado.aba = a[0]; estado.edicao = null; renderPainel(); } }, a[1]);
@@ -210,15 +212,6 @@
       acoes ? h('div', { class: 'acoes' }, acoes) : null);
   }
 
-  function telaBoloesParticipante() {
-    return h('section', {},
-      h('h2', {}, 'Bolões abertos'),
-      estado.boloes.length === 0
-        ? h('p', { class: 'vazio' }, 'Nenhum bolão aberto no momento.')
-        : estado.boloes.map(function (b) { return cartaoBolao(b); }),
-      h('p', { class: 'sub' }, 'Em breve: escolha dos seus jogos e geração do PIX.'));
-  }
-
   function telaBoloesAdmin() {
     if (estado.edicao) return formularioBolao();
     return h('section', {},
@@ -237,7 +230,9 @@
   }
 
   async function recarregarBoloes() {
-    estado.boloes = await API.chamar('admin.boloes.listar', {});
+    var r = await Promise.all([API.chamar('admin.boloes.listar', {}), API.chamar('boloes.abertos', {})]);
+    estado.boloes = r[0];
+    estado.abertos = r[1];
     renderPainel();
   }
 
@@ -330,6 +325,244 @@
     return form;
   }
 
+  // ---------- participante: banner, menu lateral e volante ----------
+  function aleatorio() {
+    var a = new Uint32Array(1);
+    window.crypto.getRandomValues(a);
+    return a[0] / 4294967296;
+  }
+
+  function modalidadeDe(b) {
+    return estado.modalidades.filter(function (m) { return m.id === b.modalidade; })[0] || { maximo: 60, minimo: 1 };
+  }
+
+  function bolaoAtual() {
+    var sel = estado.abertos.filter(function (b) { return b.id === estado.bolaoSel; })[0];
+    return sel || estado.abertos[0] || null;
+  }
+
+  function cotaDe(b) {
+    return estado.minhasCotas.filter(function (c) { return c.bolaoId === b.id; })[0] || null;
+  }
+
+  function contagem(prazo) {
+    return h('span', { class: 'contagem', 'data-prazo': prazo }, U.formatarRestante(prazo - API.agoraServidor()));
+  }
+
+  function atualizarContagens() {
+    var els = document.querySelectorAll('.contagem[data-prazo]');
+    for (var i = 0; i < els.length; i++) {
+      els[i].textContent = U.formatarRestante(Number(els[i].getAttribute('data-prazo')) - API.agoraServidor());
+    }
+  }
+
+  function selecionarBolao(id) {
+    estado.bolaoSel = id;
+    estado.volante = { sel: [], editando: null };
+    estado.verMinhas = false;
+    estado.menuAberto = false;
+    renderPainel();
+  }
+
+  function heroBanner(b) {
+    if (!b) {
+      return h('section', { class: 'hero tema-neutro' }, h('div', { class: 'hero-texto' },
+        h('h2', {}, 'Bem-vindo ao Bolão da Sorte'), h('p', {}, 'Quando houver um bolão aberto, ele aparece aqui.')));
+    }
+    return h('section', { class: 'hero tema-' + b.modalidade },
+      h('div', { class: 'hero-texto' },
+        h('span', { class: 'hero-selo' }, b.modalidadeNome),
+        h('h2', {}, b.nome),
+        h('p', {}, b.jogosPorCota + ' jogos de ' + b.qtdNumeros + ' números · cota de ' + U.centavosParaReais(b.valorCotaCentavos))),
+      h('div', { class: 'hero-info' },
+        h('div', {}, h('small', {}, 'Fecha em'), h('strong', {}, contagem(b.prazo))),
+        h('div', {}, h('small', {}, 'Vagas'), h('strong', {}, b.vagas + ' de ' + b.limiteCotas))));
+  }
+
+  function menuLateral() {
+    var atual = bolaoAtual();
+    return h('aside', { class: 'menu' + (estado.menuAberto ? ' aberto' : ''), id: 'menu-lateral', 'aria-label': 'Menu de bolões' },
+      h('button', { class: 'menu-fechar link', onclick: function () { estado.menuAberto = false; renderPainel(); } }, 'Fechar'),
+      h('nav', { class: 'menu-nav' },
+        h('button', { class: !estado.verMinhas ? 'ativa' : '', onclick: function () { estado.verMinhas = false; estado.menuAberto = false; renderPainel(); } }, 'Bolões abertos'),
+        h('button', { class: estado.verMinhas ? 'ativa' : '', onclick: function () { estado.verMinhas = true; estado.menuAberto = false; renderPainel(); } },
+          'Minhas cotas' + (estado.minhasCotas.length ? ' (' + estado.minhasCotas.length + ')' : ''))),
+      h('h3', {}, 'Bolões abertos'),
+      estado.abertos.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum no momento.')
+        : estado.abertos.map(function (b) {
+          var minha = cotaDe(b);
+          return h('button', { class: 'mini tema-' + b.modalidade + (atual && atual.id === b.id && !estado.verMinhas ? ' atual' : ''),
+            'aria-current': atual && atual.id === b.id && !estado.verMinhas ? 'true' : null, onclick: function () { selecionarBolao(b.id); } },
+            h('span', { class: 'mini-mod' }, b.modalidadeNome),
+            h('strong', {}, b.nome),
+            h('span', { class: 'mini-linha' }, U.centavosParaReais(b.valorCotaCentavos) + ' · ' + b.vagas + ' vagas'),
+            h('span', { class: 'mini-linha' }, 'Fecha em ', contagem(b.prazo)),
+            minha ? h('span', { class: 'mini-selo' }, minha.status === 'completa' ? 'Cota completa' : 'Em andamento') : null);
+        }));
+  }
+
+  function telaParticipar() {
+    var b = bolaoAtual();
+    var principal;
+    if (estado.verMinhas) principal = telaMinhasCotas();
+    else principal = h('div', { class: 'vista' + (b ? ' tema-' + b.modalidade : '') }, heroBanner(b), b ? conteudoBolao(b) : h('p', { class: 'vazio' }, 'Nenhum bolão aberto no momento.'));
+    return h('div', { class: 'layout-participar' },
+      h('div', { class: 'principal' },
+        h('button', { class: 'abrir-menu', onclick: function () { estado.menuAberto = true; renderPainel(); } }, '☰ Bolões e menu'),
+        principal),
+      menuLateral(),
+      estado.menuAberto ? h('div', { class: 'fundo-menu', onclick: function () { estado.menuAberto = false; renderPainel(); } }) : null);
+  }
+
+  function telaMinhasCotas() {
+    return h('div', { class: 'vista' }, h('h2', {}, 'Minhas cotas'),
+      estado.minhasCotas.length === 0 ? h('p', { class: 'vazio' }, 'Você ainda não iniciou nenhuma cota.')
+        : estado.minhasCotas.map(function (c) {
+          var b = estado.abertos.filter(function (x) { return x.id === c.bolaoId; })[0];
+          return h('article', { class: 'cartao' },
+            h('div', { class: 'cartao-topo' }, h('h3', {}, b ? b.nome : 'Bolão'),
+              h('span', { class: 'selo ' + (c.status === 'completa' ? 'aberto' : 'rascunho') }, c.status === 'completa' ? 'Completa' : 'Em andamento')),
+            h('p', { class: 'sub' }, c.jogos.length + (b ? ' de ' + b.jogosPorCota : '') + ' jogos montados'),
+            b ? h('div', { class: 'acoes' }, h('button', { class: 'primario', onclick: function () { selecionarBolao(b.id); } }, 'Abrir')) : null);
+        }));
+  }
+
+  function conteudoBolao(b) {
+    var cota = cotaDe(b);
+    if (!cota) {
+      return h('article', { class: 'cartao' },
+        h('h3', {}, 'Participe deste bolão'),
+        h('p', {}, 'Você monta ' + b.jogosPorCota + ' jogos de ' + b.qtdNumeros + ' números. Depois que a cota estiver completa, é só gerar o PIX (em breve) e aguardar a confirmação do administrador.'),
+        b.vagas === 0 ? h('p', { class: 'erro-form' }, 'Todas as cotas já foram preenchidas.') : null,
+        h('div', { class: 'acoes' }, h('button', { class: 'primario', disabled: b.vagas === 0, onclick: function (ev) {
+          executar(async function () {
+            var nova = await API.chamar('cotas.criar', { bolaoId: b.id });
+            estado.minhasCotas.push(nova);
+            estado.abertos = await API.chamar('boloes.abertos', {});
+            estado.volante = { sel: [], editando: null };
+            renderPainel();
+          }, ev.target);
+        } }, 'Iniciar minha cota')));
+    }
+    return volanteCota(b, cota);
+  }
+
+  function volanteCota(b, cota) {
+    var mod = modalidadeDe(b);
+    var v = estado.volante;
+    var total = b.jogosPorCota;
+    var faltam = total - cota.jogos.length;
+    var editando = !!v.editando;
+    var mostrarVolante = faltam > 0 || editando;
+    var partes = [];
+
+    // progresso
+    partes.push(h('div', { class: 'progresso' },
+      h('div', { class: 'progresso-texto' }, h('strong', {}, cota.jogos.length + ' de ' + total), ' jogos montados'),
+      h('div', { class: 'barra', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': cota.jogos.length },
+        h('div', { style: 'width:' + Math.round(cota.jogos.length / total * 100) + '%' }))));
+
+    if (cota.status === 'completa' && !editando) {
+      partes.push(h('div', { class: 'destaque' }, h('strong', {}, 'Cota completa! '),
+        'Os ' + total + ' jogos estão prontos. Gerar o PIX para pagar a cota fica na próxima etapa. Até lá você ainda pode editar os jogos abaixo.'));
+    }
+
+    if (mostrarVolante) {
+      var contador = h('p', { class: 'volante-contador', 'aria-live': 'polite' });
+      var btnAdd = h('button', { class: 'primario', disabled: true }, editando ? 'Salvar alteração' : 'Adicionar à cota');
+      var erroBox = h('p', { class: 'erro-form', role: 'alert' });
+      var botoes = {};
+
+      var atualizar = function () {
+        var n = v.sel.length;
+        contador.textContent = n + ' de ' + b.qtdNumeros + ' números escolhidos' + (n ? ': ' + v.sel.slice().sort(function (x, y) { return x - y; }).join(' · ') : '');
+        btnAdd.disabled = n !== b.qtdNumeros;
+        Object.keys(botoes).forEach(function (k) {
+          var marcado = v.sel.indexOf(Number(k)) !== -1;
+          botoes[k].className = 'bola' + (marcado ? ' marcada' : '');
+          botoes[k].setAttribute('aria-pressed', String(marcado));
+        });
+      };
+
+      var grade = h('div', { class: 'volante', style: 'grid-template-columns: repeat(' + U.colunasVolante(mod.maximo) + ', 1fr)', role: 'group', 'aria-label': 'Números de 1 a ' + mod.maximo });
+      for (var n = mod.minimo; n <= mod.maximo; n++) {
+        (function (num) {
+          var bt = h('button', { type: 'button', class: 'bola', 'aria-pressed': 'false', 'aria-label': 'Número ' + num, onclick: function () {
+            erroBox.textContent = '';
+            var i = v.sel.indexOf(num);
+            if (i !== -1) v.sel.splice(i, 1);
+            else if (v.sel.length >= b.qtdNumeros) { erroBox.textContent = 'Este jogo já tem ' + b.qtdNumeros + ' números. Desmarque um para trocar.'; return; }
+            else v.sel.push(num);
+            atualizar();
+          } }, String(num < 10 ? '0' + num : num));
+          botoes[num] = bt;
+          grade.appendChild(bt);
+        })(n);
+      }
+
+      btnAdd.addEventListener('click', function () {
+        var payload = { cotaId: cota.id, numeros: v.sel.slice().sort(function (x, y) { return x - y; }) };
+        if (v.editando) payload.jogoId = v.editando;
+        executar(async function () {
+          var nova = await API.chamar('jogos.salvar', payload);
+          estado.minhasCotas = estado.minhasCotas.map(function (c) { return c.id === nova.id ? nova : c; });
+          estado.volante = { sel: [], editando: null };
+          aviso(editando ? 'Jogo atualizado.' : 'Jogo adicionado.');
+          renderPainel();
+        }, btnAdd, function (m) { erroBox.textContent = m; });
+      });
+
+      partes.push(h('section', { class: 'cartao' },
+        h('h3', {}, editando ? 'Editando um jogo' : 'Jogo ' + (cota.jogos.length + 1) + ' de ' + total),
+        h('p', { class: 'sub' }, 'Escolha ' + b.qtdNumeros + ' números entre ' + mod.minimo + ' e ' + mod.maximo + '.'),
+        contador, grade, erroBox,
+        h('div', { class: 'acoes' },
+          h('button', { type: 'button', onclick: function () {
+            v.sel = U.sortearNumeros(mod.maximo, b.qtdNumeros, aleatorio);
+            erroBox.textContent = '';
+            atualizar();
+          } }, 'Surpresinha'),
+          h('button', { type: 'button', onclick: function () { v.sel = []; erroBox.textContent = ''; atualizar(); } }, 'Limpar'),
+          editando ? h('button', { type: 'button', onclick: function () { estado.volante = { sel: [], editando: null }; renderPainel(); } }, 'Cancelar edição') : null,
+          btnAdd)));
+      atualizar();
+    }
+
+    // jogos já montados
+    partes.push(h('section', { class: 'cartao' },
+      h('h3', {}, 'Seus jogos'),
+      cota.jogos.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum jogo ainda. Escolha os números acima e adicione.')
+        : h('ol', { class: 'jogos' }, cota.jogos.map(function (j, i) {
+          return h('li', { class: v.editando === j.id ? 'em-edicao' : '' },
+            h('span', { class: 'jogo-n' }, 'Jogo ' + (i + 1)),
+            h('span', { class: 'chips' }, j.numeros.map(function (n) { return h('span', { class: 'chip' }, n < 10 ? '0' + n : String(n)); })),
+            h('span', { class: 'jogo-acoes' },
+              h('button', { onclick: function () { estado.volante = { sel: j.numeros.slice(), editando: j.id }; renderPainel(); window.scrollTo(0, 0); } }, 'Editar'),
+              h('button', { class: 'perigo', onclick: function (ev) {
+                executar(async function () {
+                  var nova = await API.chamar('jogos.remover', { cotaId: cota.id, jogoId: j.id });
+                  estado.minhasCotas = estado.minhasCotas.map(function (c) { return c.id === nova.id ? nova : c; });
+                  if (estado.volante.editando === j.id) estado.volante = { sel: [], editando: null };
+                  renderPainel();
+                }, ev.target);
+              } }, 'Remover')));
+        }))));
+
+    partes.push(h('div', { class: 'acoes rodape-cota' }, h('button', { class: 'perigo', onclick: function (ev) {
+      if (!window.confirm('Desistir desta cota? Os jogos montados serão apagados e a vaga será liberada.')) return;
+      executar(async function () {
+        await API.chamar('cotas.cancelar', { cotaId: cota.id });
+        estado.minhasCotas = estado.minhasCotas.filter(function (c) { return c.id !== cota.id; });
+        estado.abertos = await API.chamar('boloes.abertos', {});
+        estado.volante = { sel: [], editando: null };
+        aviso('Cota cancelada.');
+        renderPainel();
+      }, ev.target);
+    } }, 'Desistir desta cota')));
+
+    return h('div', { class: 'volante-tela' }, partes);
+  }
+
   // ---------- convites ----------
   async function copiar(texto) {
     try {
@@ -418,5 +651,6 @@
     renderAcesso();
   }
 
+  setInterval(atualizarContagens, 30000);
   iniciar();
 })();

@@ -1,6 +1,6 @@
 {
   "name": "apostas",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Organizador de bolão (Google Planilhas, Drive e Netlify)",
   "scripts": {

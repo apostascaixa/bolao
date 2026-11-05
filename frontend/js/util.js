@@ -47,7 +47,41 @@
     return new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   }
 
+  /** Tempo restante em texto curto: "6d 23h", "5h 10min", "12min", "Encerrado". */
+  function formatarRestante(ms) {
+    if (!(ms > 0)) return 'Encerrado';
+    var min = Math.floor(ms / 60000);
+    var d = Math.floor(min / 1440);
+    var h = Math.floor((min % 1440) / 60);
+    var m = min % 60;
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'min';
+    return Math.max(1, m) + 'min';
+  }
+
+  /** Quantas colunas o volante usa, conforme o maior número da modalidade. */
+  function colunasVolante(max) {
+    if (max <= 25) return 5;
+    if (max <= 31) return 7;
+    if (max <= 60) return 6;
+    return 8;
+  }
+
+  /** Sorteia `qtd` números distintos de 1 a `max`, em ordem crescente. `aleatorio()` devolve [0,1). */
+  function sortearNumeros(max, qtd, aleatorio) {
+    var pool = [];
+    for (var n = 1; n <= max; n++) pool.push(n);
+    for (var i = 0; i < qtd; i++) {
+      var j = i + Math.floor(aleatorio() * (pool.length - i));
+      var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    return pool.slice(0, qtd).sort(function (a, b) { return a - b; });
+  }
+
   var api = {
+    formatarRestante: formatarRestante,
+    colunasVolante: colunasVolante,
+    sortearNumeros: sortearNumeros,
     reaisParaCentavos: reaisParaCentavos,
     centavosParaDecimalBR: centavosParaDecimalBR,
     centavosParaReais: centavosParaReais,

@@ -36,3 +36,39 @@ test('datas locais: ida e volta e entradas inválidas', () => {
   assert.ok(Number.isNaN(U.inputLocalParaMs('31/12/2026')));
   assert.ok(Number.isNaN(U.inputLocalParaMs(null)));
 });
+
+test('tempo restante em texto curto', () => {
+  const MIN = 60000, H = 60 * MIN, D = 24 * H;
+  assert.equal(U.formatarRestante(0), 'Encerrado');
+  assert.equal(U.formatarRestante(-5), 'Encerrado');
+  assert.equal(U.formatarRestante(NaN), 'Encerrado');
+  assert.equal(U.formatarRestante(30 * 1000), '1min');
+  assert.equal(U.formatarRestante(12 * MIN), '12min');
+  assert.equal(U.formatarRestante(5 * H + 10 * MIN), '5h 10min');
+  assert.equal(U.formatarRestante(6 * D + 23 * H + 59 * MIN), '6d 23h');
+});
+
+test('colunas do volante por modalidade', () => {
+  assert.equal(U.colunasVolante(25), 5);
+  assert.equal(U.colunasVolante(31), 7);
+  assert.equal(U.colunasVolante(60), 6);
+  assert.equal(U.colunasVolante(80), 8);
+});
+
+test('sorteio de números: distintos, no intervalo, ordenados e completos', () => {
+  let semente = 12345;
+  const rng = () => { semente = (semente * 1664525 + 1013904223) % 4294967296; return semente / 4294967296; };
+  for (const [max, qtd] of [[60, 6], [25, 15], [80, 5], [31, 7], [60, 20], [6, 6]]) {
+    for (let k = 0; k < 200; k++) {
+      const r = U.sortearNumeros(max, qtd, rng);
+      assert.equal(r.length, qtd);
+      assert.equal(new Set(r).size, qtd);
+      assert.ok(r.every((n) => Number.isInteger(n) && n >= 1 && n <= max));
+      assert.deepEqual(r, r.slice().sort((a, b) => a - b));
+    }
+  }
+  // todos os números aparecem alguma vez (sem viés de borda)
+  const vistos = new Set();
+  for (let k = 0; k < 2000; k++) U.sortearNumeros(60, 6, rng).forEach((n) => vistos.add(n));
+  assert.equal(vistos.size, 60);
+});

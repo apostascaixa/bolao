@@ -1,6 +1,7 @@
 // ===== Base: configuração, erros, utilitários =====
 var G = (typeof globalThis !== 'undefined') ? globalThis : this;
 var Regras = G.BolaoRegras;
+var Rateio = G.BolaoRateio;
 
 var CFG = {
   ABAS: {
@@ -17,7 +18,8 @@ var CFG = {
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,
   HASH_ITER_PADRAO: 3000,
-  CONVITE_HORAS_PADRAO: 72
+  CONVITE_HORAS_PADRAO: 72,
+  COTA_ABANDONO_MS: 48 * 3600 * 1000 // cota em rascunho/completa sem atividade por 48h libera a vaga
 };
 
 var RELOGIO = { agora: function () { return Date.now(); } };

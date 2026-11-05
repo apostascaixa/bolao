@@ -431,3 +431,191 @@ test('codificar/decodificar são inversos e aceitam valores já gravados sem pre
   for (const v of ['', 'abc', '~til', '12e4', '=x']) assert.equal(env.ctx.decodificarTexto(env.ctx.codificarTexto(v)), v);
   assert.equal(env.ctx.decodificarTexto('legado'), 'legado');
 });
+
+// ---------- cotas e jogos ----------
+function cenarioCotas(extra = {}) {
+  const { env, token } = comAdmin();
+  const id = env.chamar('admin.boloes.criar', { token, ...bolaoValido({ jogosPorCota: 3, limiteCotas: 2, ...extra }) }).dados.id;
+  env.chamar('admin.boloes.status', { token, id, status: 'aberto' });
+  const maria = convidarParticipante(env, token, 'maria', 'senha-maria-1');
+  const joao = convidarParticipante(env, token, 'joao', 'senha-joao-12');
+  return { env, token, id, maria, joao };
+}
+const J = (...n) => n;
+
+test('resposta inclui o horário do servidor', () => {
+  const { env, token } = comAdmin();
+  const r = env.chamar('eu', { token });
+  assert.equal(r.agora, env.tempo);
+});
+
+test('participante cria cota, monta os jogos e ela fica completa', () => {
+  const { env, id, maria } = cenarioCotas();
+  const c = env.chamar('cotas.criar', { token: maria, bolaoId: id });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.dados.status, 'rascunho');
+  const cotaId = c.dados.id;
+
+  let r = env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [42, 7, 1, 60, 33, 18] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.dados.jogos[0].numeros, [1, 7, 18, 33, 42, 60]); // ordenado
+  assert.equal(r.dados.status, 'rascunho');
+  r = env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  r = env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [10, 11, 12, 13, 14, 15] });
+  assert.equal(r.dados.status, 'completa');
+  assert.equal(r.dados.jogos.length, 3);
+
+  const minhas = env.chamar('cotas.minhas', { token: maria }).dados;
+  assert.equal(minhas.length, 1);
+  assert.equal(minhas[0].jogos.length, 3);
+});
+
+test('jogos de texto parecido com data/número sobrevivem à planilha', () => {
+  const { env, id, maria } = cenarioCotas({ qtdNumeros: 6 });
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 7] });
+  const j = env.chamar('cotas.minhas', { token: maria }).dados[0].jogos;
+  assert.deepEqual(j.map((x) => x.numeros), [[1, 2, 3, 4, 5, 6], [1, 2, 3, 4, 5, 7]]);
+});
+
+test('jogo inválido, repetido ou além do limite é recusado', () => {
+  const { env, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  const salvar = (numeros, extra = {}) => env.chamar('jogos.salvar', { token: maria, cotaId, numeros, ...extra });
+  assert.equal(salvar([1, 2, 3, 4, 5]).ok, false);
+  assert.equal(salvar([1, 1, 2, 3, 4, 5]).ok, false);
+  assert.equal(salvar([1, 2, 3, 4, 5, 61]).ok, false);
+  assert.equal(salvar('1,2,3').ok, false);
+  assert.equal(salvar([1, 2, 3, 4, 5, 6]).ok, true);
+  const dup = salvar([6, 5, 4, 3, 2, 1]);
+  assert.equal(dup.ok, false);
+  assert.match(dup.erro, /já está na sua cota/);
+  salvar([7, 8, 9, 10, 11, 12]); salvar([13, 14, 15, 16, 17, 18]);
+  const exc = salvar([20, 21, 22, 23, 24, 25]);
+  assert.equal(exc.ok, false);
+  assert.match(exc.erro, /todos os 3 jogos/);
+});
+
+test('editar um jogo pelo id e remover volta a cota para rascunho', () => {
+  const { env, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  const s = (n, e = {}) => env.chamar('jogos.salvar', { token: maria, cotaId, numeros: n, ...e });
+  s([1, 2, 3, 4, 5, 6]); s([7, 8, 9, 10, 11, 12]);
+  const completa = s([13, 14, 15, 16, 17, 18]);
+  assert.equal(completa.dados.status, 'completa');
+  const jogoId = completa.dados.jogos[1].id;
+
+  const ed = s([20, 21, 22, 23, 24, 25], { jogoId });
+  assert.equal(ed.ok, true, JSON.stringify(ed));
+  assert.deepEqual(ed.dados.jogos[1].numeros, [20, 21, 22, 23, 24, 25]);
+  assert.equal(ed.dados.status, 'completa');
+  assert.equal(s([1, 2, 3, 4, 5, 6], { jogoId }).ok, false); // viraria duplicado do jogo 1
+
+  const rem = env.chamar('jogos.remover', { token: maria, cotaId, jogoId });
+  assert.equal(rem.ok, true);
+  assert.equal(rem.dados.jogos.length, 2);
+  assert.equal(rem.dados.status, 'rascunho');
+  assert.equal(env.chamar('jogos.remover', { token: maria, cotaId, jogoId }).ok, false);
+});
+
+test('ninguém mexe na cota de outra pessoa', () => {
+  const { env, id, maria, joao, token } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  for (const acao of ['jogos.salvar', 'jogos.remover', 'cotas.cancelar']) {
+    const r = env.chamar(acao, { token: joao, cotaId, numeros: [7, 8, 9, 10, 11, 12], jogoId: 'x' });
+    assert.equal(r.ok, false, acao);
+    assert.equal(r.erro, 'Cota não encontrada.');
+  }
+  assert.equal(env.chamar('cotas.minhas', { token: joao }).dados.length, 0);
+  assert.equal(env.chamar('cotas.minhas', { token }).dados.length, 0);
+});
+
+test('máximo de cotas por pessoa e limite de cotas do bolão', () => {
+  const { env, token, id, maria, joao } = cenarioCotas({ limiteCotas: 2, maxCotasPorPessoa: 1 });
+  assert.equal(env.chamar('cotas.criar', { token: maria, bolaoId: id }).ok, true);
+  const dupla = env.chamar('cotas.criar', { token: maria, bolaoId: id });
+  assert.equal(dupla.ok, false);
+  assert.match(dupla.erro, /máximo de cotas/);
+  assert.equal(env.chamar('cotas.criar', { token: joao, bolaoId: id }).ok, true);
+  const cheio = env.chamar('cotas.criar', { token, bolaoId: id });
+  assert.equal(cheio.ok, false);
+  assert.match(cheio.erro, /já foram preenchidas/);
+  assert.equal(env.chamar('boloes.abertos', { token: joao }).dados[0].vagas, 0);
+});
+
+test('desistir da cota libera a vaga e apaga os jogos', () => {
+  const { env, token, id, maria, joao } = cenarioCotas({ limiteCotas: 1 });
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [7, 8, 9, 10, 11, 12] });
+  assert.equal(env.chamar('cotas.criar', { token: joao, bolaoId: id }).ok, false);
+  assert.equal(env.chamar('cotas.cancelar', { token: maria, cotaId }).ok, true);
+  assert.equal(env.ss.getSheetByName('Jogos').rows.length, 1); // só o cabeçalho
+  assert.equal(env.chamar('cotas.criar', { token: joao, bolaoId: id }).ok, true);
+  assert.equal(env.chamar('cotas.minhas', { token: maria }).dados.length, 0);
+});
+
+test('cota abandonada por 48h libera a vaga; o dono é avisado ao voltar', () => {
+  const { env, id, maria, joao } = cenarioCotas({ limiteCotas: 1, prazo: T0 + 200 * HORA });
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.tempo += 47 * HORA;
+  assert.equal(env.chamar('cotas.criar', { token: joao, bolaoId: id }).ok, false); // ainda ocupa
+  env.tempo += 2 * HORA;
+  assert.equal(env.chamar('boloes.abertos', { token: joao }).dados[0].vagas, 1);
+  assert.equal(env.chamar('cotas.criar', { token: joao, bolaoId: id }).ok, true);
+  const volta = env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  assert.equal(volta.ok, false);
+  assert.match(volta.erro, /expirou por inatividade/);
+});
+
+test('atividade renova o prazo de abandono', () => {
+  const { env, id, maria } = cenarioCotas({ prazo: T0 + 300 * HORA });
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.tempo += 40 * HORA;
+  assert.equal(env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] }).ok, true);
+  env.tempo += 40 * HORA; // 80h desde a criação, 40h desde a atividade
+  assert.equal(env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [7, 8, 9, 10, 11, 12] }).ok, true);
+});
+
+test('bolão fechado, em rascunho ou com prazo vencido não aceita cota nem jogo', () => {
+  const { env, token, id, maria } = cenarioCotas({ prazo: T0 + 10 * HORA });
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.tempo += 11 * HORA;
+  const a = env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  assert.equal(a.ok, false);
+  assert.match(a.erro, /prazo/);
+  assert.equal(env.chamar('cotas.criar', { token: maria, bolaoId: id }).ok, false);
+
+  const rasc = env.chamar('admin.boloes.criar', { token, ...bolaoValido({ prazo: env.tempo + 50 * HORA }) }).dados.id;
+  const r = env.chamar('cotas.criar', { token: maria, bolaoId: rasc });
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /não está aberto/);
+  assert.equal(env.chamar('cotas.criar', { token: maria, bolaoId: 'inexistente' }).ok, false);
+});
+
+test('administrador também pode participar; ações exigem login', () => {
+  const { env, token, id } = cenarioCotas();
+  assert.equal(env.chamar('cotas.criar', { token, bolaoId: id }).ok, true);
+  for (const acao of ['cotas.minhas', 'cotas.criar', 'cotas.cancelar', 'jogos.salvar', 'jogos.remover']) {
+    assert.equal(env.chamar(acao, { bolaoId: id }).ok, false, acao);
+  }
+});
+
+test('contagem de vagas do administrador acompanha as cotas', () => {
+  const { env, token, id, maria } = cenarioCotas({ limiteCotas: 5 });
+  env.chamar('cotas.criar', { token: maria, bolaoId: id });
+  const lista = env.chamar('admin.boloes.listar', { token }).dados;
+  assert.equal(lista[0].cotasOcupadas, 1);
+  assert.equal(lista[0].vagas, 4);
+});
+
+test('nenhuma operação de cota deixa o lock preso', () => {
+  const { env, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
+  env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] }); // erro de propósito
+  env.chamar('cotas.cancelar', { token: maria, cotaId });
+  assert.equal(env.estaTravado(), false);
+});

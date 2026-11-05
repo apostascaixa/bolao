@@ -6,6 +6,11 @@ var ACOES = {
   'eu':                    { nivel: 'usuario', fn: function (d, u) { return usuarioPublico(u); } },
   'modalidades':           { nivel: 'usuario', fn: function () { return modalidadesDisponiveis(); } },
   'boloes.abertos':        { nivel: 'usuario', fn: function () { return boloesAbertos(); } },
+  'cotas.minhas':          { nivel: 'usuario', fn: function (d, u) { return minhasCotas(u); } },
+  'cotas.criar':           { nivel: 'usuario', fn: function (d, u) { return criarCota(u, d); } },
+  'cotas.cancelar':        { nivel: 'usuario', fn: function (d, u) { return cancelarCota(u, d); } },
+  'jogos.salvar':          { nivel: 'usuario', fn: function (d, u) { return salvarJogo(u, d); } },
+  'jogos.remover':         { nivel: 'usuario', fn: function (d, u) { return removerJogo(u, d); } },
   'admin.convites.criar':  { nivel: 'admin',   fn: function (d, u) { return criarConvite(u, d); } },
   'admin.convites.listar': { nivel: 'admin',   fn: function () { return listarConvites(); } },
   'admin.convites.revogar': { nivel: 'admin',  fn: function (d) { return revogarConvite(d); } },
@@ -24,7 +29,7 @@ function despachar(corpo) {
     var usuario = null;
     if (def.nivel === 'usuario') usuario = autenticar(corpo.token);
     if (def.nivel === 'admin') usuario = exigirAdmin(corpo.token);
-    return { ok: true, dados: def.fn(corpo, usuario) };
+    return { ok: true, dados: def.fn(corpo, usuario), agora: RELOGIO.agora() };
   } catch (err) {
     if (err && err.negocio) return { ok: false, erro: err.message };
     console.error('Erro interno: ' + (err && err.stack ? err.stack : err));

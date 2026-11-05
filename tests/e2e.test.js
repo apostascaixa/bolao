@@ -74,16 +74,90 @@ test('fluxo completo: admin, bolões, convites, participante', async (t) => {
   await page.getByLabel('Senha', { exact: true }).fill('senha-maria-1');
   await page.getByLabel('Repita a senha').fill('senha-maria-1');
   await page.getByRole('button', { name: 'Criar conta' }).click();
-  await page.getByRole('heading', { name: 'Bolões abertos' }).waitFor();
-  assert.ok(await page.getByText('20 vagas').isVisible());
+  await page.locator('.hero').waitFor();
+  assert.ok(await page.locator('.hero').getByText('20 de 20').isVisible());
+  assert.ok(await page.locator('.hero').getByText('Fecha em').isVisible());
   assert.equal(await page.getByRole('button', { name: 'Novo bolão' }).count(), 0);
   assert.equal(await page.getByRole('tab', { name: 'Convites' }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Excluir' }).count(), 0);
   await page.screenshot({ path: '/tmp/e2e-participante.png' });
 
-  // 7) sessão persiste ao recarregar
+  // 6b) volante: escolher números, limites, duplicado, surpresinha, editar, remover, completar
+  await page.getByRole('button', { name: 'Iniciar minha cota' }).click();
+  await page.getByRole('heading', { name: 'Jogo 1 de 10' }).waitFor();
+  const num = (n) => page.getByRole('button', { name: 'Número ' + n, exact: true });
+  const progresso = (txt) => page.locator('.progresso-texto').getByText(txt, { exact: true });
+  assert.ok(await page.getByRole('button', { name: 'Adicionar à cota' }).isDisabled());
+  for (const n of [1, 2, 3, 4, 5, 6]) await num(n).click();
+  await page.getByText('6 de 6 números escolhidos: 1 · 2 · 3 · 4 · 5 · 6').waitFor();
+  assert.equal(await num(3).getAttribute('aria-pressed'), 'true');
+  await num(7).click();
+  await page.getByText('Este jogo já tem 6 números.').waitFor();
+  await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+  await progresso('1 de 10').waitFor();
+  await page.getByRole('heading', { name: 'Jogo 2 de 10' }).waitFor();
+  for (const n of [6, 5, 4, 3, 2, 1]) await num(n).click();
+  await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+  await page.getByText('Este jogo já está na sua cota.').waitFor();
+  await page.getByRole('button', { name: 'Limpar' }).click();
+  await page.getByRole('button', { name: 'Surpresinha' }).click();
+  await page.getByText(/^6 de 6 números escolhidos/).waitFor();
+  assert.equal(await page.locator('.bola.marcada').count(), 6);
+  await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+  await progresso('2 de 10').waitFor();
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: '/tmp/e2e-volante.png', fullPage: true });
+
+  await page.getByRole('button', { name: 'Editar' }).first().click();
+  await page.getByRole('heading', { name: 'Editando um jogo' }).waitFor();
+  assert.equal(await page.locator('.bola.marcada').count(), 6);
+  await page.getByRole('button', { name: 'Limpar' }).click();
+  for (const n of [10, 20, 30, 40, 50, 60]) await num(n).click();
+  await page.getByRole('button', { name: 'Salvar alteração' }).click();
+  await progresso('2 de 10').waitFor();
+  assert.ok(await page.locator('.jogos li').first().getByText('60', { exact: true }).isVisible());
+  await page.getByRole('button', { name: 'Remover' }).last().click();
+  await progresso('1 de 10').waitFor();
+
+  for (let i = 0; i < 20 && (await page.getByRole('heading', { name: /^Jogo \d+ de 10$/ }).count()) > 0; i++) {
+    await page.getByRole('button', { name: 'Surpresinha' }).click();
+    await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+    await page.waitForTimeout(80);
+  }
+  await progresso('10 de 10').waitFor();
+  await page.getByText('Cota completa!').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Adicionar à cota' }).count(), 0);
+
+  // 6c) menu lateral (gaveta no celular), minhas cotas e transições
+  await page.getByRole('button', { name: '☰ Bolões e menu' }).click();
+  await page.locator('.menu.aberto .mini').waitFor();
+  assert.ok(await page.locator('.menu.aberto .mini').getByText('Cota completa').isVisible());
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: '/tmp/e2e-menu.png' });
+  await page.getByRole('button', { name: /^Minhas cotas/ }).click();
+  await page.getByRole('heading', { name: 'Minhas cotas' }).waitFor();
+  assert.ok(await page.getByText('10 de 10 jogos montados').isVisible());
+  await page.getByRole('button', { name: 'Abrir' }).click();
+  await page.locator('.hero').waitFor();
+
+  // 7) sessão e jogos persistem ao recarregar
   await page.reload();
-  await page.getByRole('heading', { name: 'Bolões abertos' }).waitFor();
+  await page.locator('.hero').waitFor();
+  await progresso('10 de 10').waitFor();
+
+  // 7b) em tela larga o menu fica fixo à direita
+  await page.setViewportSize({ width: 1200, height: 800 });
+  assert.ok(await page.locator('.menu .mini').isVisible());
+  assert.equal(await page.getByRole('button', { name: '☰ Bolões e menu' }).isVisible(), false);
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: '/tmp/e2e-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // 7c) desistir da cota libera a vaga
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Desistir desta cota' }).click();
+  await page.getByRole('button', { name: 'Iniciar minha cota' }).waitFor();
+  assert.ok(await page.locator('.hero').getByText('20 de 20').isVisible());
 
   // 8) o código do convite não funciona duas vezes
   await page.getByRole('button', { name: 'Sair' }).click();
@@ -104,6 +178,11 @@ test('fluxo completo: admin, bolões, convites, participante', async (t) => {
   await page.getByLabel('Senha').fill('senha-forte-1');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await page.getByRole('heading', { name: 'Bolões', exact: true }).waitFor();
+
+  // 9b) o administrador também pode participar
+  await page.getByRole('tab', { name: 'Participar' }).click();
+  await page.locator('.hero').waitFor();
+  await page.getByRole('tab', { name: 'Administrar bolões' }).click();
 
   // 10) editar (sem cotas: tudo editável) e depois com cota (campos travados)
   await page.getByRole('button', { name: 'Editar' }).click();

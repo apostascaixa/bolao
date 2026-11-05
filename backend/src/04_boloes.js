@@ -1,6 +1,16 @@
 // ===== Bolões (administrador) =====
+/** Uma cota ocupa vaga se não expirou e, antes do pagamento, teve atividade nas últimas 48h. */
+function cotaOcupaVaga(c, agora) {
+  if (c.status === 'expirada') return false;
+  if (c.status === 'rascunho' || c.status === 'completa') {
+    return (agora - (c.atualizadoEm || c.criadoEm || 0)) <= CFG.COTA_ABANDONO_MS;
+  }
+  return true;
+}
+
 function cotasAtivasDoBolao(bolaoId) {
-  return lerTabela('Cotas').filter(function (c) { return c.bolaoId === bolaoId && c.status !== 'expirada'; });
+  var agora = RELOGIO.agora();
+  return lerTabela('Cotas').filter(function (c) { return c.bolaoId === bolaoId && cotaOcupaVaga(c, agora); });
 }
 
 function bolaoParaSaida(b, ocupadas) {
@@ -119,21 +129,23 @@ function excluirBolao(d) {
 }
 
 function listarBoloesAdmin(d) {
+  var agora = RELOGIO.agora();
   var todas = lerTabela('Cotas');
   return lerTabela('Boloes')
     .filter(function (b) { return d.incluirArquivados || b.status !== 'arquivado'; })
     .map(function (b) {
-      var n = todas.filter(function (c) { return c.bolaoId === b.id && c.status !== 'expirada'; }).length;
+      var n = todas.filter(function (c) { return c.bolaoId === b.id && cotaOcupaVaga(c, agora); }).length;
       return bolaoParaSaida(b, n);
     });
 }
 
 function boloesAbertos() {
+  var agora = RELOGIO.agora();
   var todas = lerTabela('Cotas');
   return lerTabela('Boloes')
     .filter(function (b) { return b.status === 'aberto'; })
     .map(function (b) {
-      var n = todas.filter(function (c) { return c.bolaoId === b.id && c.status !== 'expirada'; }).length;
+      var n = todas.filter(function (c) { return c.bolaoId === b.id && cotaOcupaVaga(c, agora); }).length;
       return bolaoParaSaida(b, n);
     });
 }
