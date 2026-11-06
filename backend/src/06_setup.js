@@ -52,6 +52,22 @@ function testeRapido() {
     ss.deleteSheet(tmp);
   }
 
+  // 1b) Células grandes (as imagens ficam na planilha em partes de 30 mil caracteres) precisam voltar inteiras.
+  var tmp2 = ss.getSheetByName('_teste2') || ss.insertSheet('_teste2');
+  try {
+    tmp2.clear();
+    var parte = 'iVBORw0KGgo' + new Array(CFG.IMG_PARTE - 10).join('A');
+    var celula = codificarTexto(parte);
+    tmp2.getRange(1, 1, 3, 2).setValues([[celula, 1], [celula, 2], [celula, 3]]);
+    var volta2 = tmp2.getRange(1, 1, 3, 2).getValues();
+    for (var q = 0; q < 3; q++) {
+      if (decodificarTexto(volta2[q][0]) !== parte) falhas.push('célula grande voltou diferente (' + String(volta2[q][0]).length + ' caracteres)');
+      if (Number(volta2[q][1]) !== q + 1) falhas.push('número ao lado da célula grande voltou como ' + volta2[q][1]);
+    }
+  } finally {
+    ss.deleteSheet(tmp2);
+  }
+
   // 2) Velocidade do hash de senha.
   var iter = iteracoesHash();
   var t0 = Date.now();

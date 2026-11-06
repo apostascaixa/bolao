@@ -138,3 +138,58 @@ button.perigo { color: var(--erro); border-color: #e3b5b2; }
 }
 
 h1, h2, h3, .mini strong, .cartao h3 { overflow-wrap: anywhere; }
+
+/* ===== Banner do topo, carrossel, PIX, configurações e página pública ===== */
+.topo-site { background: #fff; border-bottom: 1px solid var(--borda); }
+.topo-site a { display: block; }
+.topo-img { display: block; width: 100%; max-height: 11rem; object-fit: cover; opacity: 0; transition: opacity .3s; }
+.topo-img.carregada { opacity: 1; }
+
+.carrossel { position: relative; margin-bottom: 1rem; }
+.car-janela { overflow: hidden; border-radius: 16px; }
+.car-faixa { display: flex; align-items: stretch; transition: transform .5s ease; }
+.car-slide { flex: 0 0 100%; min-width: 0; display: flex; }
+.car-slide > * { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.car-banner { position: relative; display: block; min-height: 10rem; background: #dfe6e2; color: #fff; text-decoration: none; }
+.car-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .3s; }
+.car-img.carregada { opacity: 1; }
+.car-legenda { position: absolute; left: 0; right: 0; bottom: 0; padding: .6rem 1rem; background: linear-gradient(transparent, rgba(0,0,0,.65)); font-weight: 600; }
+.car-seta { position: absolute; top: 50%; transform: translateY(-50%); width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 50%; font-size: 1.5rem; line-height: 1; background: rgba(255,255,255,.85); border-color: transparent; z-index: 2; }
+.car-seta.esq { left: .5rem; } .car-seta.dir { right: .5rem; }
+.car-pontos { position: absolute; left: 0; right: 0; bottom: .5rem; display: flex; justify-content: center; gap: .4rem; z-index: 2; pointer-events: none; }
+.car-ponto { pointer-events: auto; width: .65rem; height: .65rem; padding: 0; border-radius: 50%; border: 0; background: rgba(255,255,255,.55); }
+.car-ponto.ativo { background: #fff; width: 1.4rem; border-radius: 999px; }
+.hero-botao { align-self: flex-end; background: rgba(255,255,255,.95); color: var(--tema-esc); border: 0; font-weight: 600; }
+.car-slide .hero { padding-bottom: 2rem; }
+
+.botao-link { display: inline-block; padding: .6rem 1rem; border: 1px solid var(--borda); border-radius: 8px; background: #fff; color: var(--texto); text-decoration: none; text-align: center; }
+.botao-link:hover { border-color: var(--verde); }
+.link-topo { margin-left: auto; color: #fff; font-size: .9rem; }
+
+.aviso-reprovado { background: #fdecea; border: 1px solid #efb5b0; color: #7a1c15; border-radius: 10px; padding: .7rem .9rem; }
+.pix .previa, .previa { text-align: center; margin: .6rem 0; }
+.pix-qr-img { max-width: min(18rem, 100%); height: auto; border: 1px solid var(--borda); border-radius: 10px; background: #fff; padding: .4rem; }
+.codigo-pix { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: .8rem; word-break: break-all; }
+textarea { font: inherit; padding: .6rem .7rem; border: 1px solid var(--borda); border-radius: 8px; width: 100%; }
+details { margin: .4rem 0; } summary { cursor: pointer; font-weight: 600; margin-bottom: .4rem; }
+.marcar { display: flex; align-items: center; gap: .5rem; margin: .6rem 0; }
+input[type=range] { padding: 0; width: 100%; }
+h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
+.banners { list-style: none; padding: 0; margin: 0 0 .5rem; display: flex; flex-direction: column; gap: .8rem; }
+.banner-item { display: flex; gap: .8rem; padding: .7rem; border: 1px solid var(--borda); border-radius: 10px; flex-wrap: wrap; }
+.miniatura { position: relative; width: 9rem; min-height: 5rem; background: #dfe6e2; border-radius: 8px; overflow: hidden; flex: 0 0 auto; }
+.banner-campos { display: flex; flex-direction: column; gap: .4rem; flex: 1 1 14rem; min-width: 0; }
+.cartao .topo-img { border-radius: 10px; }
+@media (max-width: 480px) { .miniatura { width: 100%; height: 6rem; } }
+
+/* ===== Ajustes visuais (conferidos nas capturas de tela) ===== */
+#toast { visibility: hidden; opacity: 0; pointer-events: none; transition: transform .2s, opacity .2s, visibility .2s; }
+#toast.visivel { visibility: visible; opacity: 1; }
+
+.abas { overflow-x: auto; scrollbar-width: thin; }
+.abas button { flex: 0 0 auto; white-space: nowrap; }
+
+.car-janela { border-radius: 16px; overflow: hidden; isolation: isolate; }
+.car-slide { overflow: hidden; }
+.car-slide .hero { border-radius: 0; padding-left: 3.4rem; padding-right: 3.4rem; }
+.car-legenda { padding-left: 3.4rem; padding-right: 3.4rem; }

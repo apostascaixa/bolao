@@ -47,6 +47,7 @@ class FakeSheet {
   appendRow(arr) { this.rows.push(arr.map(comoPlanilhas)); }
   deleteRow(n) { this.rows.splice(n - 1, 1); }
   getMaxRows() { return 1000; }
+  getLastRow() { return this.rows.length; }
   setFrozenRows() {}
   clear() { this.rows = []; }
 }

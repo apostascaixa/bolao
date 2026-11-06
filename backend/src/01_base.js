@@ -2,6 +2,7 @@
 var G = (typeof globalThis !== 'undefined') ? globalThis : this;
 var Regras = G.BolaoRegras;
 var Rateio = G.BolaoRateio;
+var Pix = G.BolaoPix;
 
 var CFG = {
   ABAS: {
@@ -9,17 +10,24 @@ var CFG = {
     Convites: ['id', 'codigoHash', 'papel', 'criadoPor', 'criadoEm', 'expiraEm', 'status', 'usadoPor', 'usadoEm'],
     Sessoes: ['tokenHash', 'userId', 'criadoEm', 'expiraEm'],
     Boloes: ['id', 'nome', 'modalidade', 'qtdNumeros', 'valorCotaCentavos', 'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'status', 'criadoPor', 'criadoEm', 'atualizadoEm'],
-    Cotas: ['id', 'bolaoId', 'userId', 'status', 'criadoEm', 'atualizadoEm', 'confirmadaEm'],
-    Jogos: ['id', 'cotaId', 'numeros', 'criadoEm']
+    Cotas: ['id', 'bolaoId', 'userId', 'status', 'criadoEm', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm', 'observacao'],
+    Jogos: ['id', 'cotaId', 'numeros', 'criadoEm'],
+    Config: ['chave', 'valor'],
+    Banners: ['id', 'imagemId', 'titulo', 'link', 'ativo', 'ordem', 'criadoEm'],
+    Imagens: ['id', 'parte', 'tipo', 'dados', 'criadoEm']
   },
   COLUNAS_NUM: ['tentativas', 'bloqueadoAte', 'criadoEm', 'expiraEm', 'usadoEm', 'qtdNumeros', 'valorCotaCentavos',
-    'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'atualizadoEm', 'confirmadaEm'],
+    'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm',
+    'parte', 'ordem', 'ativo'],
   SESSAO_MS: 7 * 24 * 3600 * 1000,
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,
   HASH_ITER_PADRAO: 3000,
   CONVITE_HORAS_PADRAO: 72,
-  COTA_ABANDONO_MS: 48 * 3600 * 1000 // cota em rascunho/completa sem atividade por 48h libera a vaga
+  COTA_ABANDONO_MS: 48 * 3600 * 1000, // cota em rascunho/completa sem atividade por 48h libera a vaga
+  IMG_MAX_B64: 300000,  // tamanho máximo da imagem em base64 (cerca de 225 KB)
+  IMG_PARTE: 30000,     // cada célula guarda no máximo 30 mil caracteres
+  MAX_BANNERS: 10
 };
 
 var RELOGIO = { agora: function () { return Date.now(); } };

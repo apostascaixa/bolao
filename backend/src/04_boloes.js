@@ -135,7 +135,10 @@ function listarBoloesAdmin(d) {
     .filter(function (b) { return d.incluirArquivados || b.status !== 'arquivado'; })
     .map(function (b) {
       var n = todas.filter(function (c) { return c.bolaoId === b.id && cotaOcupaVaga(c, agora); }).length;
-      return bolaoParaSaida(b, n);
+      var saida = bolaoParaSaida(b, n);
+      saida.confirmadas = todas.filter(function (c) { return c.bolaoId === b.id && c.status === 'confirmada'; }).length;
+      saida.aguardando = todas.filter(function (c) { return c.bolaoId === b.id && c.status === 'aguardando_pagamento'; }).length;
+      return saida;
     });
 }
 

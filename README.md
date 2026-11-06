@@ -5,7 +5,7 @@ Sistema de organização de bolão em grupo. Não é um canal oficial de apostas
 ## Estrutura
 - `shared/` regras das modalidades, rateio e geração de PIX (testados)
 - `backend/src/` código do Apps Script em partes; `backend/Codigo.gs` é o arquivo gerado (único) que se cola no Apps Script
-- `frontend/` telas (HTML/CSS/JS puros) publicadas no Netlify; a URL da API fica em `frontend/config.js`
+- `frontend/` telas (HTML/CSS/JS puros) publicadas no Netlify; a URL da API fica em `frontend/config.js`; `publico.html` é a página pública dos jogos aprovados
 - `tests/` testes automatizados
 - `netlify.toml` publica a pasta `frontend`
 

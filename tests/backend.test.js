@@ -253,7 +253,7 @@ test('doPost com corpo inválido responde erro sem estourar', () => {
 
 test('erro inesperado vira mensagem genérica e é registrado', () => {
   const { env, token } = comAdmin();
-  env.ss.sheets.Boloes = undefined; // quebra de propósito
+  env.ctx.lerTabela = () => { throw new Error('falha simulada'); }; // quebra de propósito
   const r = env.chamar('admin.boloes.listar', { token });
   assert.equal(r.ok, false);
   assert.equal(r.erro, 'Erro interno. Tente novamente.');
@@ -617,5 +617,337 @@ test('nenhuma operação de cota deixa o lock preso', () => {
   env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] });
   env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [1, 2, 3, 4, 5, 6] }); // erro de propósito
   env.chamar('cotas.cancelar', { token: maria, cotaId });
+  assert.equal(env.estaTravado(), false);
+});
+
+test('doGet informa a versão publicada e conhece as ações da etapa 4', () => {
+  const env = preparar();
+  const r = JSON.parse(env.ctx.doGet().getContent());
+  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '5' });
+  for (const a of ['cotas.minhas', 'cotas.criar', 'cotas.cancelar', 'jogos.salvar', 'jogos.remover']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(env.ctx.ACOES, a), a);
+  }
+});
+
+// ---------- PIX, aprovação, página pública, config e imagens ----------
+const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+
+function pngBase64(lado = 4) {
+  const crc32 = (buf) => zlib.crc32(buf);
+  const bloco = (tipo, dados) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(dados.length);
+    const t = Buffer.from(tipo);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc32(Buffer.concat([t, dados])) >>> 0);
+    return Buffer.concat([len, t, dados, c]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(lado, 0); ihdr.writeUInt32BE(lado, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const linha = Buffer.concat([Buffer.from([0]), Buffer.alloc(lado * 3, 200)]);
+  const raw = Buffer.concat(Array.from({ length: lado }, () => linha));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), bloco('IHDR', ihdr), bloco('IDAT', zlib.deflateSync(raw)), bloco('IEND', Buffer.alloc(0))]).toString('base64');
+}
+const dataUrlPng = (lado) => 'data:image/png;base64,' + pngBase64(lado);
+
+function configurarPix(env, token, extra = {}) {
+  const r = env.chamar('admin.config.salvar', { token, pix: { chave: 'bolao@exemplo.com', nome: 'João da Silva', cidade: 'Brasília', instrucoes: 'Pague e aguarde.', ...extra } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+}
+
+function cotaCompleta(env, tokenUser, bolaoId) {
+  const cotaId = env.chamar('cotas.criar', { token: tokenUser, bolaoId }).dados.id;
+  [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18]].forEach((n) => env.chamar('jogos.salvar', { token: tokenUser, cotaId, numeros: n }));
+  return cotaId;
+}
+
+test('gerar PIX: exige cota completa, PIX configurado e trava os jogos', () => {
+  const { env, token, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  assert.match(env.chamar('cotas.gerarPix', { token: maria, cotaId }).erro, /Complete todos os 3 jogos/);
+  [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18]].forEach((n) => env.chamar('jogos.salvar', { token: maria, cotaId, numeros: n }));
+  assert.match(env.chamar('cotas.gerarPix', { token: maria, cotaId }).erro, /ainda não configurou o PIX/);
+
+  configurarPix(env, token);
+  const r = env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.cota.status, 'aguardando_pagamento');
+  assert.ok(r.dados.cota.pixGeradoEm > 0);
+  assert.equal(r.dados.pix.valorCentavos, 6000);
+  assert.ok(r.dados.pix.copiaECola.startsWith('000201'));
+  assert.ok(r.dados.pix.copiaECola.includes('60.00'));
+  assert.equal(r.dados.pix.instrucoes, 'Pague e aguarde.');
+
+  // trava: não edita, não remove, não cancela, não gera de novo
+  const jogoId = r.dados.cota.jogos[0].id;
+  assert.equal(env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [20, 21, 22, 23, 24, 25], jogoId }).ok, false);
+  assert.equal(env.chamar('jogos.remover', { token: maria, cotaId, jogoId }).ok, false);
+  assert.equal(env.chamar('cotas.cancelar', { token: maria, cotaId }).ok, false);
+  assert.equal(env.chamar('cotas.gerarPix', { token: maria, cotaId }).ok, false);
+  // releitura do PIX
+  assert.equal(env.chamar('cotas.pix', { token: maria, cotaId }).dados.valorCentavos, 6000);
+});
+
+test('PIX só com QR (sem chave) também libera a geração', () => {
+  const { env, token, id, maria } = cenarioCotas();
+  assert.equal(env.chamar('admin.imagem.enviar', { token, uso: 'qr', dataUrl: dataUrlPng() }).ok, true);
+  const cotaId = cotaCompleta(env, maria, id);
+  const r = env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.pix.copiaECola, '');
+  assert.ok(r.dados.pix.qrImagemId);
+});
+
+test('PIX de outra pessoa não é acessível; sem login é recusado', () => {
+  const { env, token, id, maria, joao } = cenarioCotas();
+  configurarPix(env, token);
+  const cotaId = cotaCompleta(env, maria, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(env.chamar('cotas.gerarPix', { token: joao, cotaId }).ok, false);
+  assert.equal(env.chamar('cotas.pix', { token: joao, cotaId }).ok, false);
+  assert.equal(env.chamar('cotas.pix', { cotaId }).ok, false);
+});
+
+test('aprovação: lista pendentes, aprova e só admin pode', () => {
+  const { env, token, id, maria } = cenarioCotas();
+  configurarPix(env, token);
+  const cotaId = cotaCompleta(env, maria, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+
+  assert.equal(env.chamar('admin.cotas.listar', { token: maria }).ok, false);
+  assert.equal(env.chamar('admin.cotas.aprovar', { token: maria, cotaId }).ok, false);
+  const pend = env.chamar('admin.cotas.listar', { token }).dados;
+  assert.equal(pend.length, 1);
+  assert.equal(pend[0].usuario.usuario, 'maria');
+  assert.equal(pend[0].bolaoNome, 'Mega da Virada');
+  assert.equal(pend[0].jogos.length, 3);
+  assert.deepEqual(env.chamar('admin.boloes.listar', { token }).dados[0].aguardando, 1);
+
+  const ap = env.chamar('admin.cotas.aprovar', { token, cotaId });
+  assert.equal(ap.dados.status, 'confirmada');
+  assert.equal(env.chamar('admin.cotas.aprovar', { token, cotaId }).ok, false); // já aprovada
+  const minhas = env.chamar('cotas.minhas', { token: maria }).dados[0];
+  assert.equal(minhas.status, 'confirmada');
+  assert.ok(minhas.confirmadaEm > 0);
+  assert.equal(env.chamar('admin.boloes.listar', { token }).dados[0].confirmadas, 1);
+  // confirmada nunca expira por abandono (limite de 48h) e continua ocupando a vaga
+  env.tempo += 100 * HORA;
+  assert.equal(env.chamar('cotas.minhas', { token: maria }).dados.length, 1);
+});
+
+test('reprovação volta a cota para "completa" com o motivo e permite novo PIX', () => {
+  const { env, token, id, maria } = cenarioCotas();
+  configurarPix(env, token);
+  const cotaId = cotaCompleta(env, maria, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(env.chamar('admin.cotas.reprovar', { token, cotaId, motivo: '' }).ok, false);
+  assert.equal(env.chamar('admin.cotas.reprovar', { token, cotaId, motivo: 'Pagamento não identificado' }).ok, true);
+  const c = env.chamar('cotas.minhas', { token: maria }).dados[0];
+  assert.equal(c.status, 'completa');
+  assert.equal(c.observacao, 'Pagamento não identificado');
+  assert.equal(env.chamar('admin.cotas.listar', { token }).dados.length, 0);
+  // pode editar de novo e gerar outro PIX; o motivo some
+  assert.equal(env.chamar('jogos.salvar', { token: maria, cotaId, numeros: [30, 31, 32, 33, 34, 35], jogoId: c.jogos[0].id }).ok, true);
+  const novo = env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(novo.ok, true, JSON.stringify(novo));
+  assert.equal(novo.dados.cota.observacao, '');
+});
+
+test('aguardando aprovação não expira por abandono', () => {
+  const { env, token, id, maria } = cenarioCotas({ limiteCotas: 1, prazo: T0 + 500 * HORA });
+  configurarPix(env, token);
+  const cotaId = cotaCompleta(env, maria, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  env.tempo += 100 * HORA;
+  assert.equal(env.chamar('boloes.abertos', { token: maria }).dados[0].vagas, 0);
+  assert.equal(env.chamar('admin.cotas.aprovar', { token, cotaId }).ok, true);
+});
+
+test('página pública: só aprovados, nome abreviado, sem usuário; não exige login', () => {
+  const { env, token, id, maria, joao } = cenarioCotas();
+  configurarPix(env, token);
+  const c1 = cotaCompleta(env, maria, id);
+  const c2 = cotaCompleta(env, joao, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId: c1 });
+  env.chamar('cotas.gerarPix', { token: joao, cotaId: c2 });
+  env.chamar('admin.cotas.aprovar', { token, cotaId: c1 });
+
+  const pub = env.chamar('publico.jogos', {});
+  assert.equal(pub.ok, true);
+  const b = pub.dados[0];
+  assert.equal(b.confirmadas, 1);
+  assert.equal(b.participantes.length, 1);
+  assert.equal(b.participantes[0].nome, 'Maria S.');
+  assert.equal(b.participantes[0].jogos.length, 3);
+  const texto = JSON.stringify(pub);
+  for (const proibido of ['maria"', 'joao', 'João', 'hashSenha', 'bolao@exemplo.com', 'userId', 'Silva']) assert.ok(!texto.includes(proibido), proibido);
+});
+
+test('página pública não lista bolão em rascunho nem arquivado', () => {
+  const { env, token } = comAdmin();
+  env.chamar('admin.boloes.criar', { token, ...bolaoValido() });
+  assert.deepEqual(env.chamar('publico.jogos', {}).dados, []);
+});
+
+test('nome abreviado cobre nomes simples e compostos', () => {
+  const env = preparar();
+  assert.equal(env.ctx.nomeAbreviado('Maria'), 'Maria');
+  assert.equal(env.ctx.nomeAbreviado('Maria Silva'), 'Maria S.');
+  assert.equal(env.ctx.nomeAbreviado('  Ana  Paula  de souza '), 'Ana S.');
+});
+
+// ----- configuração -----
+test('config: validações do PIX, link e velocidade; só admin', () => {
+  const { env, token, maria: _m } = (() => { const a = comAdmin(); return { ...a, maria: convidarParticipante(a.env, a.token) }; })();
+  const salvar = (corpo) => env.chamar('admin.config.salvar', { token, ...corpo });
+  assert.equal(salvar({ pix: { chave: 'x@y.com', nome: '', cidade: 'Brasília' } }).ok, false);
+  assert.equal(salvar({ pix: { chave: 'x'.repeat(200), nome: 'A', cidade: 'B' } }).ok, false);
+  assert.equal(salvar({ topo: { link: 'http://inseguro.com' } }).ok, false);
+  assert.equal(salvar({ topo: { link: 'javascript:alert(1)' } }).ok, false);
+  assert.equal(salvar({ carrossel: { segundos: 1 } }).ok, false);
+  assert.equal(salvar({ carrossel: { segundos: 31 } }).ok, false);
+  assert.equal(salvar({ carrossel: { segundos: 4.5 } }).ok, false);
+  const ok = salvar({ carrossel: { segundos: 10, incluirBoloes: false }, topo: { link: 'https://exemplo.com/x' } });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.dados.carrossel.segundos, 10);
+  assert.equal(ok.dados.carrossel.incluirBoloes, false);
+  assert.equal(ok.dados.topo.link, 'https://exemplo.com/x');
+  assert.equal(env.chamar('admin.config.salvar', { token: _m, carrossel: { segundos: 5 } }).ok, false);
+  assert.equal(env.chamar('admin.config.obter', { token: _m }).ok, false);
+});
+
+test('config pública: velocidade padrão, sem chave PIX', () => {
+  const { env, token } = comAdmin();
+  assert.equal(env.chamar('publico.config', {}).dados.carrossel.segundos, 6);
+  configurarPix(env, token);
+  env.chamar('admin.config.salvar', { token, carrossel: { segundos: 12 } });
+  const pub = env.chamar('publico.config', {});
+  assert.equal(pub.dados.carrossel.segundos, 12);
+  assert.ok(!JSON.stringify(pub).includes('bolao@exemplo.com'));
+  assert.ok(!('pix' in pub.dados));
+});
+
+// ----- imagens e banners -----
+test('imagem: envia, recebe de volta idêntica, em várias partes', () => {
+  const { env, token } = comAdmin();
+  const url = dataUrlPng(120); // grande o bastante para mais de uma parte? ver abaixo
+  const r = env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: url });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const id = r.dados.topo.imagemId;
+  const volta = env.chamar('imagem.obter', { id });
+  assert.equal(volta.ok, true);
+  assert.equal(volta.dados.dataUrl, url);
+});
+
+test('imagem grande é dividida em partes de até 30 mil caracteres e reconstruída', () => {
+  const { env, token } = comAdmin();
+  const lixo = crypto.randomBytes(120000).toString('base64'); // ~160 mil caracteres
+  const url = 'data:image/jpeg;base64,/9j/' + lixo.replace(/[^A-Za-z0-9+/]/g, 'A');
+  const r = env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: url });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const linhas = env.ss.getSheetByName('Imagens').rows.length - 1;
+  assert.ok(linhas >= 5 && linhas <= 7, 'partes: ' + linhas);
+  for (const row of env.ss.getSheetByName('Imagens').rows.slice(1)) assert.ok(String(row[3]).length <= 30001);
+  assert.equal(env.chamar('imagem.obter', { id: r.dados.topo.imagemId }).dados.dataUrl, url);
+});
+
+test('imagem inválida, grande demais ou de tipo perigoso é recusada', () => {
+  const { env, token } = comAdmin();
+  const enviar = (dataUrl, uso = 'topo') => env.chamar('admin.imagem.enviar', { token, uso, dataUrl });
+  assert.equal(enviar('texto qualquer').ok, false);
+  assert.equal(enviar('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=').ok, false);
+  assert.equal(enviar('data:text/html;base64,PGh0bWw+').ok, false);
+  assert.equal(enviar('data:image/png;base64,AAAA').ok, false);                   // assinatura errada
+  assert.equal(enviar('data:image/png;base64,iVBORw0KGgo' + 'A'.repeat(300001)).ok, false);
+  assert.equal(enviar(dataUrlPng(), 'outro').ok, false);
+  assert.equal(enviar(null).ok, false);
+  assert.equal(env.ss.getSheetByName('Imagens').rows.length, 1); // nada foi gravado
+});
+
+test('trocar a imagem remove a antiga; remover limpa tudo', () => {
+  const { env, token } = comAdmin();
+  const a = env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: dataUrlPng(8) }).dados.topo.imagemId;
+  const b = env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: dataUrlPng(16) }).dados.topo.imagemId;
+  assert.notEqual(a, b);
+  assert.equal(env.chamar('imagem.obter', { id: a }).ok, false);
+  assert.equal(env.chamar('imagem.obter', { id: b }).ok, true);
+  const rem = env.chamar('admin.imagem.remover', { token, uso: 'topo' });
+  assert.equal(rem.dados.topo.imagemId, '');
+  assert.equal(env.ss.getSheetByName('Imagens').rows.length, 1);
+  assert.equal(env.chamar('admin.imagem.remover', { token, uso: 'banner' }).ok, false);
+});
+
+test('imagem do QR do PIX exige login; banners são públicos; id inventado não vaza nada', () => {
+  const { env, token } = comAdmin();
+  const qr = env.chamar('admin.imagem.enviar', { token, uso: 'qr', dataUrl: dataUrlPng(6) }).dados.pix.qrImagemId;
+  const topo = env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: dataUrlPng(7) }).dados.topo.imagemId;
+  assert.equal(env.chamar('imagem.obter', { id: qr }).ok, false);
+  assert.equal(env.chamar('imagem.obter', { id: qr, token }).ok, true);
+  assert.equal(env.chamar('imagem.obter', { id: topo }).ok, true);
+  assert.equal(env.chamar('imagem.obter', { id: 'inventado' }).ok, false);
+  assert.equal(env.chamar('imagem.obter', { id: 123 }).ok, false);
+  assert.equal(env.chamar('imagem.obter', {}).ok, false);
+});
+
+test('banners: adicionar, reordenar, ocultar, editar e remover; o público só vê os ativos', () => {
+  const { env, token } = comAdmin();
+  const add = (titulo, extra = {}) => env.chamar('admin.imagem.enviar', { token, uso: 'banner', titulo, dataUrl: dataUrlPng(5), ...extra });
+  add('Primeiro'); add('Segundo', { link: 'https://exemplo.com' }); add('Terceiro');
+  let cfg = env.chamar('admin.config.obter', { token }).dados;
+  assert.deepEqual(cfg.banners.map((b) => b.titulo), ['Primeiro', 'Segundo', 'Terceiro']);
+  const [b1, b2, b3] = cfg.banners;
+
+  cfg = env.chamar('admin.banners.mover', { token, id: b3.id, direcao: 'cima' }).dados;
+  assert.deepEqual(cfg.banners.map((b) => b.titulo), ['Primeiro', 'Terceiro', 'Segundo']);
+  cfg = env.chamar('admin.banners.mover', { token, id: b1.id, direcao: 'cima' }).dados; // já é o primeiro
+  assert.deepEqual(cfg.banners.map((b) => b.titulo), ['Primeiro', 'Terceiro', 'Segundo']);
+  assert.equal(env.chamar('admin.banners.mover', { token, id: b1.id, direcao: 'lado' }).ok, false);
+
+  env.chamar('admin.banners.atualizar', { token, id: b2.id, ativo: false, titulo: 'Segundo!' });
+  const pub = env.chamar('publico.config', {}).dados.banners;
+  assert.deepEqual(pub.map((b) => b.titulo), ['Primeiro', 'Terceiro']);
+  assert.equal(env.chamar('admin.banners.atualizar', { token, id: b1.id, link: 'ftp://x' }).ok, false);
+
+  env.chamar('admin.banners.remover', { token, id: b1.id });
+  assert.equal(env.chamar('admin.config.obter', { token }).dados.banners.length, 2);
+  assert.equal(env.chamar('imagem.obter', { id: b1.imagemId }).ok, false);
+  assert.equal(env.chamar('admin.banners.remover', { token, id: b1.id }).ok, false);
+});
+
+test('limite de 10 banners', () => {
+  const { env, token } = comAdmin();
+  for (let i = 0; i < 10; i++) assert.equal(env.chamar('admin.imagem.enviar', { token, uso: 'banner', dataUrl: dataUrlPng(3) }).ok, true);
+  const r = env.chamar('admin.imagem.enviar', { token, uso: 'banner', dataUrl: dataUrlPng(3) });
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /Limite de 10/);
+});
+
+test('apenas admin envia ou remove imagens e banners', () => {
+  const { env, token } = comAdmin();
+  const tp = convidarParticipante(env, token);
+  for (const [acao, corpo] of [['admin.imagem.enviar', { uso: 'topo', dataUrl: dataUrlPng() }], ['admin.imagem.remover', { uso: 'topo' }],
+    ['admin.banners.atualizar', { id: 'x' }], ['admin.banners.mover', { id: 'x', direcao: 'cima' }], ['admin.banners.remover', { id: 'x' }]]) {
+    assert.equal(env.chamar(acao, { token: tp, ...corpo }).ok, false, acao);
+  }
+});
+
+test('abas novas são criadas sozinhas em planilhas da versão anterior', () => {
+  const env = preparar();
+  delete env.ss.sheets.Config; delete env.ss.sheets.Banners; delete env.ss.sheets.Imagens;
+  env.ctx.primeiroAdmin();
+  const cod = env.logs.find((l) => l.includes('CÓDIGO')).match(/: ([0-9A-F-]{23})$/)[1];
+  const token = env.chamar('cadastrar', { codigoConvite: cod, usuario: 'admin', nome: 'Admin', senha: 'senha-forte-1' }).dados.token;
+  assert.equal(env.chamar('publico.config', {}).ok, true);
+  assert.equal(env.chamar('admin.config.obter', { token }).ok, true);
+  assert.ok(env.ss.getSheetByName('Config'));
+  assert.equal(env.ss.getSheetByName('Banners').rows[0][0], 'id');
+});
+
+test('nenhuma operação nova deixa o lock preso', () => {
+  const { env, token, id, maria } = cenarioCotas();
+  configurarPix(env, token);
+  const cotaId = cotaCompleta(env, maria, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  env.chamar('admin.cotas.reprovar', { token, cotaId, motivo: 'x' }); // erro de propósito (curto)
+  env.chamar('admin.cotas.aprovar', { token, cotaId });
+  env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: 'lixo' });
   assert.equal(env.estaTravado(), false);
 });

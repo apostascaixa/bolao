@@ -6,7 +6,8 @@ function textoParaNumeros(t) {
 function cotaParaSaida(c, jogosDaCota) {
   var ordenados = jogosDaCota.slice().sort(function (a, b) { return (a.criadoEm || 0) - (b.criadoEm || 0); });
   return {
-    id: c.id, bolaoId: c.bolaoId, status: c.status,
+    id: c.id, bolaoId: c.bolaoId, status: c.status, observacao: c.observacao || '',
+    pixGeradoEm: c.pixGeradoEm || 0, confirmadaEm: c.confirmadaEm || 0,
     jogos: ordenados.map(function (j) { return { id: j.id, numeros: textoParaNumeros(j.numeros) }; })
   };
 }

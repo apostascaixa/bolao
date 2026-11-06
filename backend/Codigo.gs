@@ -140,7 +140,7 @@
   var TRANSICOES = {
     rascunho: ['completa', 'expirada'],
     completa: ['rascunho', 'aguardando_pagamento', 'expirada'],
-    aguardando_pagamento: ['confirmada', 'rascunho', 'expirada'],
+    aguardando_pagamento: ['confirmada', 'completa', 'rascunho', 'expirada'],
     confirmada: [],
     expirada: []
   };
@@ -285,6 +285,7 @@
 var G = (typeof globalThis !== 'undefined') ? globalThis : this;
 var Regras = G.BolaoRegras;
 var Rateio = G.BolaoRateio;
+var Pix = G.BolaoPix;
 
 var CFG = {
   ABAS: {
@@ -292,17 +293,24 @@ var CFG = {
     Convites: ['id', 'codigoHash', 'papel', 'criadoPor', 'criadoEm', 'expiraEm', 'status', 'usadoPor', 'usadoEm'],
     Sessoes: ['tokenHash', 'userId', 'criadoEm', 'expiraEm'],
     Boloes: ['id', 'nome', 'modalidade', 'qtdNumeros', 'valorCotaCentavos', 'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'status', 'criadoPor', 'criadoEm', 'atualizadoEm'],
-    Cotas: ['id', 'bolaoId', 'userId', 'status', 'criadoEm', 'atualizadoEm', 'confirmadaEm'],
-    Jogos: ['id', 'cotaId', 'numeros', 'criadoEm']
+    Cotas: ['id', 'bolaoId', 'userId', 'status', 'criadoEm', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm', 'observacao'],
+    Jogos: ['id', 'cotaId', 'numeros', 'criadoEm'],
+    Config: ['chave', 'valor'],
+    Banners: ['id', 'imagemId', 'titulo', 'link', 'ativo', 'ordem', 'criadoEm'],
+    Imagens: ['id', 'parte', 'tipo', 'dados', 'criadoEm']
   },
   COLUNAS_NUM: ['tentativas', 'bloqueadoAte', 'criadoEm', 'expiraEm', 'usadoEm', 'qtdNumeros', 'valorCotaCentavos',
-    'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'atualizadoEm', 'confirmadaEm'],
+    'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm',
+    'parte', 'ordem', 'ativo'],
   SESSAO_MS: 7 * 24 * 3600 * 1000,
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,
   HASH_ITER_PADRAO: 3000,
   CONVITE_HORAS_PADRAO: 72,
-  COTA_ABANDONO_MS: 48 * 3600 * 1000 // cota em rascunho/completa sem atividade por 48h libera a vaga
+  COTA_ABANDONO_MS: 48 * 3600 * 1000, // cota em rascunho/completa sem atividade por 48h libera a vaga
+  IMG_MAX_B64: 300000,  // tamanho máximo da imagem em base64 (cerca de 225 KB)
+  IMG_PARTE: 30000,     // cada célula guarda no máximo 30 mil caracteres
+  MAX_BANNERS: 10
 };
 
 var RELOGIO = { agora: function () { return Date.now(); } };
@@ -366,15 +374,32 @@ function comLock(fn) {
 
 // ======================= backend/src/02_dados.js =======================
 // ===== Acesso à planilha =====
+var PLANILHA_EM_CACHE = null; // vale só durante uma execução (cada chamada à API reinicia as variáveis globais)
+
 function planilha() {
+  if (PLANILHA_EM_CACHE) return PLANILHA_EM_CACHE;
   var id = props().getProperty('PLANILHA_ID');
   if (!id) throw new Error('Execute configurar() primeiro.');
-  return SpreadsheetApp.openById(id);
+  PLANILHA_EM_CACHE = SpreadsheetApp.openById(id);
+  return PLANILHA_EM_CACHE;
 }
 
+/** Devolve a aba; se ela ainda não existe (versão nova do sistema), cria com o cabeçalho. */
 function aba(nome) {
-  var s = planilha().getSheetByName(nome);
-  if (!s) throw new Error('Aba ausente: ' + nome + '. Execute configurar().');
+  var ss = planilha();
+  var s = ss.getSheetByName(nome);
+  if (!s) {
+    var cols = CFG.ABAS[nome];
+    if (!cols) throw new Error('Aba desconhecida: ' + nome);
+    try {
+      s = ss.insertSheet(nome);
+    } catch (e) {
+      s = ss.getSheetByName(nome); // outra execução criou ao mesmo tempo
+      if (!s) throw e;
+    }
+    s.getRange(1, 1, 1, cols.length).setValues([cols]);
+    s.setFrozenRows(1);
+  }
   return s;
 }
 
@@ -805,7 +830,10 @@ function listarBoloesAdmin(d) {
     .filter(function (b) { return d.incluirArquivados || b.status !== 'arquivado'; })
     .map(function (b) {
       var n = todas.filter(function (c) { return c.bolaoId === b.id && cotaOcupaVaga(c, agora); }).length;
-      return bolaoParaSaida(b, n);
+      var saida = bolaoParaSaida(b, n);
+      saida.confirmadas = todas.filter(function (c) { return c.bolaoId === b.id && c.status === 'confirmada'; }).length;
+      saida.aguardando = todas.filter(function (c) { return c.bolaoId === b.id && c.status === 'aguardando_pagamento'; }).length;
+      return saida;
     });
 }
 
@@ -837,11 +865,26 @@ var ACOES = {
   'eu':                    { nivel: 'usuario', fn: function (d, u) { return usuarioPublico(u); } },
   'modalidades':           { nivel: 'usuario', fn: function () { return modalidadesDisponiveis(); } },
   'boloes.abertos':        { nivel: 'usuario', fn: function () { return boloesAbertos(); } },
+  'publico.config':        { nivel: 'publico', fn: function () { return configPublica(); } },
+  'publico.jogos':         { nivel: 'publico', fn: function () { return paginaPublica(); } },
+  'imagem.obter':          { nivel: 'publico', fn: function (d) { return obterImagem(d); } },
+  'cotas.gerarPix':        { nivel: 'usuario', fn: function (d, u) { return gerarPixCota(u, d); } },
+  'cotas.pix':             { nivel: 'usuario', fn: function (d, u) { return pixDaMinhaCota(u, d); } },
   'cotas.minhas':          { nivel: 'usuario', fn: function (d, u) { return minhasCotas(u); } },
   'cotas.criar':           { nivel: 'usuario', fn: function (d, u) { return criarCota(u, d); } },
   'cotas.cancelar':        { nivel: 'usuario', fn: function (d, u) { return cancelarCota(u, d); } },
   'jogos.salvar':          { nivel: 'usuario', fn: function (d, u) { return salvarJogo(u, d); } },
   'jogos.remover':         { nivel: 'usuario', fn: function (d, u) { return removerJogo(u, d); } },
+  'admin.cotas.listar':    { nivel: 'admin',   fn: function (d) { return listarCotasAdmin(d); } },
+  'admin.cotas.aprovar':   { nivel: 'admin',   fn: function (d) { return aprovarCota(d); } },
+  'admin.cotas.reprovar':  { nivel: 'admin',   fn: function (d) { return reprovarCota(d); } },
+  'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
+  'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
+  'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
+  'admin.imagem.remover':  { nivel: 'admin',   fn: function (d) { return removerImagemUso(d); } },
+  'admin.banners.atualizar': { nivel: 'admin', fn: function (d) { return atualizarBanner(d); } },
+  'admin.banners.mover':   { nivel: 'admin',   fn: function (d) { return moverBanner(d); } },
+  'admin.banners.remover': { nivel: 'admin',   fn: function (d) { return removerBanner(d); } },
   'admin.convites.criar':  { nivel: 'admin',   fn: function (d, u) { return criarConvite(u, d); } },
   'admin.convites.listar': { nivel: 'admin',   fn: function () { return listarConvites(); } },
   'admin.convites.revogar': { nivel: 'admin',  fn: function (d) { return revogarConvite(d); } },
@@ -882,8 +925,11 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
+var VERSAO_API = '5';
+
+/** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {
-  return responder({ ok: true, servico: 'bolao-api' });
+  return responder({ ok: true, servico: 'bolao-api', versao: VERSAO_API });
 }
 
 
@@ -942,6 +988,22 @@ function testeRapido() {
     ss.deleteSheet(tmp);
   }
 
+  // 1b) Células grandes (as imagens ficam na planilha em partes de 30 mil caracteres) precisam voltar inteiras.
+  var tmp2 = ss.getSheetByName('_teste2') || ss.insertSheet('_teste2');
+  try {
+    tmp2.clear();
+    var parte = 'iVBORw0KGgo' + new Array(CFG.IMG_PARTE - 10).join('A');
+    var celula = codificarTexto(parte);
+    tmp2.getRange(1, 1, 3, 2).setValues([[celula, 1], [celula, 2], [celula, 3]]);
+    var volta2 = tmp2.getRange(1, 1, 3, 2).getValues();
+    for (var q = 0; q < 3; q++) {
+      if (decodificarTexto(volta2[q][0]) !== parte) falhas.push('célula grande voltou diferente (' + String(volta2[q][0]).length + ' caracteres)');
+      if (Number(volta2[q][1]) !== q + 1) falhas.push('número ao lado da célula grande voltou como ' + volta2[q][1]);
+    }
+  } finally {
+    ss.deleteSheet(tmp2);
+  }
+
   // 2) Velocidade do hash de senha.
   var iter = iteracoesHash();
   var t0 = Date.now();
@@ -973,7 +1035,8 @@ function textoParaNumeros(t) {
 function cotaParaSaida(c, jogosDaCota) {
   var ordenados = jogosDaCota.slice().sort(function (a, b) { return (a.criadoEm || 0) - (b.criadoEm || 0); });
   return {
-    id: c.id, bolaoId: c.bolaoId, status: c.status,
+    id: c.id, bolaoId: c.bolaoId, status: c.status, observacao: c.observacao || '',
+    pixGeradoEm: c.pixGeradoEm || 0, confirmadaEm: c.confirmadaEm || 0,
     jogos: ordenados.map(function (j) { return { id: j.id, numeros: textoParaNumeros(j.numeros) }; })
   };
 }
@@ -1093,5 +1156,401 @@ function cancelarCota(u, d) {
     atualizar('Cotas', c._linha, c);
     return { id: c.id, cancelada: true };
   });
+}
+
+
+// ======================= backend/src/08_config.js =======================
+// ===== Configurações do administrador: PIX, banner do topo, carrossel =====
+function lerConfig() {
+  var o = {};
+  lerTabela('Config').forEach(function (r) { o[r.chave] = r.valor; });
+  return o;
+}
+
+/** Chamar dentro de comLock. */
+function gravarConfig(pares) {
+  var t = lerTabela('Config');
+  Object.keys(pares).forEach(function (k) {
+    var ex = t.filter(function (r) { return r.chave === k; })[0];
+    if (ex) { ex.valor = String(pares[k]); atualizar('Config', ex._linha, ex); }
+    else inserir('Config', { chave: k, valor: String(pares[k]) });
+  });
+}
+
+function segundosCarrossel(c) {
+  var n = Number(c['carrossel.segundos']);
+  return (n >= 2 && n <= 30) ? n : 6;
+}
+
+function validarLink(l) {
+  l = String(l === undefined || l === null ? '' : l).trim();
+  if (l === '') return '';
+  if (!/^https:\/\/[^\s]+$/i.test(l) || l.length > 300) throw erroNegocio('O link deve começar com https:// e não ter espaços.');
+  return l;
+}
+
+function listarBanners(soAtivos) {
+  return lerTabela('Banners')
+    .filter(function (b) { return !soAtivos || b.ativo === 1; })
+    .sort(function (a, b) { return a.ordem - b.ordem; })
+    .map(function (b) { return { id: b.id, imagemId: b.imagemId, titulo: b.titulo, link: b.link, ativo: b.ativo === 1, ordem: b.ordem }; });
+}
+
+function configParaAdmin() {
+  var c = lerConfig();
+  return {
+    pix: { chave: c['pix.chave'] || '', nome: c['pix.nome'] || '', cidade: c['pix.cidade'] || '', instrucoes: c['pix.instrucoes'] || '', qrImagemId: c['pix.qrImagemId'] || '' },
+    topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
+    carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    banners: listarBanners(false)
+  };
+}
+
+/** Só o que o público pode ver: nada de chave PIX. */
+function configPublica() {
+  var c = lerConfig();
+  return {
+    topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
+    carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    banners: listarBanners(true).map(function (b) { return { id: b.id, imagemId: b.imagemId, titulo: b.titulo, link: b.link }; })
+  };
+}
+
+function salvarConfig(d) {
+  return comLock(function () {
+    var pares = {};
+    if (d.pix !== undefined) {
+      var p = d.pix || {};
+      var chave = String(p.chave === undefined || p.chave === null ? '' : p.chave).trim();
+      var nome = limparTexto(p.nome, 60);
+      var cidade = limparTexto(p.cidade, 30);
+      var instr = limparTexto(p.instrucoes, 300);
+      if (chave.length > 140) throw erroNegocio('Chave PIX muito longa.');
+      if (chave !== '') {
+        if (!nome || !cidade) throw erroNegocio('Com a chave PIX, informe também o nome do recebedor e a cidade.');
+        try {
+          Pix.gerarPix({ chave: chave, nomeRecebedor: nome, cidade: cidade, valorCentavos: 100 });
+        } catch (e) {
+          throw erroNegocio('Dados do PIX inválidos: ' + e.message);
+        }
+      }
+      pares['pix.chave'] = chave; pares['pix.nome'] = nome; pares['pix.cidade'] = cidade; pares['pix.instrucoes'] = instr;
+    }
+    if (d.topo !== undefined) pares['topo.link'] = validarLink((d.topo || {}).link);
+    if (d.carrossel !== undefined) {
+      var cr = d.carrossel || {};
+      if (cr.segundos !== undefined) {
+        if (!Number.isInteger(cr.segundos) || cr.segundos < 2 || cr.segundos > 30) throw erroNegocio('A velocidade deve ser de 2 a 30 segundos por banner.');
+        pares['carrossel.segundos'] = cr.segundos;
+      }
+      if (cr.incluirBoloes !== undefined) pares['carrossel.incluirBoloes'] = cr.incluirBoloes ? '1' : '0';
+    }
+    gravarConfig(pares);
+    return configParaAdmin();
+  });
+}
+
+
+// ======================= backend/src/09_imagens.js =======================
+// ===== Imagens (guardadas na planilha, em partes) e banners =====
+var ASSINATURAS_IMG = { 'image/png': 'iVBORw0KGgo', 'image/jpeg': '/9j/', 'image/webp': 'UklGR' };
+
+function validarDataUrl(dataUrl) {
+  var m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+\/]+={0,2})$/.exec(String(dataUrl === undefined || dataUrl === null ? '' : dataUrl));
+  if (!m) throw erroNegocio('Imagem inválida. Envie PNG, JPEG ou WEBP.');
+  if (m[2].length > CFG.IMG_MAX_B64) throw erroNegocio('Imagem grande demais. Use uma imagem menor.');
+  if (m[2].indexOf(ASSINATURAS_IMG[m[1]]) !== 0) throw erroNegocio('O arquivo não parece ser uma imagem válida.');
+  return { tipo: m[1], b64: m[2] };
+}
+
+/** Chamar dentro de comLock. Grava a imagem em linhas consecutivas e devolve o id. */
+function salvarImagemInterna(v, agora) {
+  var id = novoId();
+  var linhas = [];
+  for (var i = 0, parte = 0; i < v.b64.length; i += CFG.IMG_PARTE, parte++) {
+    linhas.push(linhaDe('Imagens', { id: id, parte: parte, tipo: v.tipo, dados: v.b64.substring(i, i + CFG.IMG_PARTE), criadoEm: agora }));
+  }
+  var sh = aba('Imagens');
+  sh.getRange(sh.getLastRow() + 1, 1, linhas.length, linhas[0].length).setValues(linhas);
+  return id;
+}
+
+/** Linhas (números) onde a imagem está, lendo só a coluna do id. */
+function linhasDaImagem(id) {
+  var sh = aba('Imagens');
+  var ult = sh.getLastRow();
+  var out = [];
+  if (ult < 2) return out;
+  var ids = sh.getRange(2, 1, ult - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) if (decodificarTexto(ids[i][0]) === id) out.push(i + 2);
+  return out;
+}
+
+function lerImagemDataUrl(id) {
+  var linhas = linhasDaImagem(id);
+  if (linhas.length === 0) return null;
+  var sh = aba('Imagens');
+  var ini = linhas[0];
+  var fim = linhas[linhas.length - 1];
+  var vals = sh.getRange(ini, 1, fim - ini + 1, CFG.ABAS.Imagens.length).getValues()
+    .filter(function (r) { return decodificarTexto(r[0]) === id; })
+    .sort(function (a, b) { return Number(a[1]) - Number(b[1]); });
+  var tipo = decodificarTexto(vals[0][2]);
+  var b64 = vals.map(function (r) { return decodificarTexto(r[3]); }).join('');
+  return 'data:' + tipo + ';base64,' + b64;
+}
+
+function removerImagemInterna(id) {
+  if (!id) return;
+  var linhas = linhasDaImagem(id);
+  for (var i = linhas.length - 1; i >= 0; i--) removerLinha('Imagens', linhas[i]);
+}
+
+function idsImagensPermitidas() {
+  var c = lerConfig();
+  var ids = [c['topo.imagemId'], c['pix.qrImagemId']];
+  lerTabela('Banners').forEach(function (b) { ids.push(b.imagemId); });
+  return ids.filter(function (x) { return !!x; });
+}
+
+/** Público para banners; a imagem do QR do PIX exige login. */
+function obterImagem(d) {
+  var naoAchou = erroNegocio('Imagem não encontrada.');
+  if (typeof d.id !== 'string' || d.id.length > 60) throw naoAchou;
+  if (idsImagensPermitidas().indexOf(d.id) === -1) throw naoAchou;
+  if (lerConfig()['pix.qrImagemId'] === d.id) autenticar(d.token);
+  var url = lerImagemDataUrl(d.id);
+  if (!url) throw naoAchou;
+  return { dataUrl: url };
+}
+
+function enviarImagem(d) {
+  return comLock(function () {
+    var agora = RELOGIO.agora();
+    var uso = d.uso;
+    if (['qr', 'topo', 'banner'].indexOf(uso) === -1) throw erroNegocio('Uso da imagem inválido.');
+    var titulo = limparTexto(d.titulo, 80);
+    var link = validarLink(d.link);
+    var banners = lerTabela('Banners');
+    if (uso === 'banner' && banners.length >= CFG.MAX_BANNERS) throw erroNegocio('Limite de ' + CFG.MAX_BANNERS + ' banners. Remova algum antes de adicionar.');
+    var v = validarDataUrl(d.dataUrl);
+    var id = salvarImagemInterna(v, agora);
+    var c = lerConfig();
+
+    if (uso === 'qr' || uso === 'topo') {
+      var chave = uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+      var antiga = c[chave];
+      var pares = {};
+      pares[chave] = id;
+      gravarConfig(pares);
+      if (antiga) removerImagemInterna(antiga);
+      return configParaAdmin();
+    }
+    var ordem = banners.reduce(function (m, b) { return Math.max(m, b.ordem || 0); }, 0) + 1;
+    inserir('Banners', { id: novoId(), imagemId: id, titulo: titulo, link: link, ativo: 1, ordem: ordem, criadoEm: agora });
+    return configParaAdmin();
+  });
+}
+
+function removerImagemUso(d) {
+  return comLock(function () {
+    if (['qr', 'topo'].indexOf(d.uso) === -1) throw erroNegocio('Uso da imagem inválido.');
+    var chave = d.uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+    var antiga = lerConfig()[chave];
+    var pares = {};
+    pares[chave] = '';
+    gravarConfig(pares);
+    removerImagemInterna(antiga);
+    return configParaAdmin();
+  });
+}
+
+function achaBanner(id) {
+  var b = lerTabela('Banners').filter(function (x) { return x.id === id; })[0];
+  if (!b) throw erroNegocio('Banner não encontrado.');
+  return b;
+}
+
+function atualizarBanner(d) {
+  return comLock(function () {
+    var b = achaBanner(d.id);
+    if (d.titulo !== undefined) b.titulo = limparTexto(d.titulo, 80);
+    if (d.link !== undefined) b.link = validarLink(d.link);
+    if (d.ativo !== undefined) b.ativo = d.ativo ? 1 : 0;
+    atualizar('Banners', b._linha, b);
+    return configParaAdmin();
+  });
+}
+
+function moverBanner(d) {
+  return comLock(function () {
+    if (d.direcao !== 'cima' && d.direcao !== 'baixo') throw erroNegocio('Direção inválida.');
+    var todos = lerTabela('Banners').sort(function (a, b) { return a.ordem - b.ordem; });
+    var i = todos.map(function (x) { return x.id; }).indexOf(d.id);
+    if (i === -1) throw erroNegocio('Banner não encontrado.');
+    var j = d.direcao === 'cima' ? i - 1 : i + 1;
+    if (j >= 0 && j < todos.length) {
+      var oi = todos[i].ordem;
+      todos[i].ordem = todos[j].ordem;
+      todos[j].ordem = oi;
+      atualizar('Banners', todos[i]._linha, todos[i]);
+      atualizar('Banners', todos[j]._linha, todos[j]);
+    }
+    return configParaAdmin();
+  });
+}
+
+function removerBanner(d) {
+  return comLock(function () {
+    var b = achaBanner(d.id);
+    removerLinha('Banners', b._linha);
+    removerImagemInterna(b.imagemId);
+    return configParaAdmin();
+  });
+}
+
+
+// ======================= backend/src/10_pix_aprovacao.js =======================
+// ===== PIX, aprovação do administrador e página pública =====
+function pixConfigurado(cfg) {
+  return !!(cfg['pix.chave'] || cfg['pix.qrImagemId']);
+}
+
+/** Dados para o participante pagar: valor, copia e cola (se houver chave), QR (se houver) e instruções. */
+function pixDaCota(c, b) {
+  var cfg = lerConfig();
+  var copia = '';
+  if (cfg['pix.chave']) {
+    copia = Pix.gerarPix({
+      chave: cfg['pix.chave'], nomeRecebedor: cfg['pix.nome'], cidade: cfg['pix.cidade'],
+      valorCentavos: b.valorCotaCentavos, txid: 'BOLAO' + String(c.id).replace(/[^A-Za-z0-9]/g, '').toUpperCase().substring(0, 12)
+    });
+  }
+  return {
+    valorCentavos: b.valorCotaCentavos, copiaECola: copia, qrImagemId: cfg['pix.qrImagemId'] || '',
+    instrucoes: cfg['pix.instrucoes'] || '', nomeRecebedor: cfg['pix.nome'] || ''
+  };
+}
+
+function gerarPixCota(u, d) {
+  return comLock(function () {
+    var agora = RELOGIO.agora();
+    var c = minhaCotaOuErro(u, d.cotaId, agora);
+    var b = achaBolao(c.bolaoId);
+    if (b.status !== 'aberto') throw erroNegocio('Este bolão não está aberto.');
+    if (b.prazo <= agora) throw erroNegocio('O prazo deste bolão terminou.');
+    var jogos = lerTabela('Jogos').filter(function (j) { return j.cotaId === c.id; });
+    if (c.status !== 'completa' || jogos.length !== b.jogosPorCota) throw erroNegocio('Complete todos os ' + b.jogosPorCota + ' jogos antes de gerar o PIX.');
+    if (!pixConfigurado(lerConfig())) throw erroNegocio('O administrador ainda não configurou o PIX. Tente novamente mais tarde.');
+    if (!Rateio.podeTransitar(c.status, 'aguardando_pagamento')) throw erroNegocio('Esta cota não pode gerar PIX agora.');
+    c.status = 'aguardando_pagamento';
+    c.pixGeradoEm = agora;
+    c.atualizadoEm = agora;
+    c.observacao = '';
+    atualizar('Cotas', c._linha, c);
+    return { cota: cotaParaSaida(c, jogos), pix: pixDaCota(c, b) };
+  });
+}
+
+/** Releitura dos dados de pagamento (ao recarregar a página). */
+function pixDaMinhaCota(u, d) {
+  var c = lerTabela('Cotas').filter(function (x) { return x.id === d.cotaId && x.userId === u.id; })[0];
+  if (!c || c.status !== 'aguardando_pagamento') throw erroNegocio('Esta cota não está aguardando pagamento.');
+  return pixDaCota(c, achaBolao(c.bolaoId));
+}
+
+// ----- administrador -----
+function listarCotasAdmin(d) {
+  var filtro = Array.isArray(d.status) ? d.status : ['aguardando_pagamento', 'confirmada'];
+  var boloes = lerTabela('Boloes');
+  var usuarios = lerTabela('Usuarios');
+  var jogos = lerTabela('Jogos');
+  return lerTabela('Cotas')
+    .filter(function (c) { return filtro.indexOf(c.status) !== -1; })
+    .sort(function (a, b) { return (a.pixGeradoEm || a.criadoEm) - (b.pixGeradoEm || b.criadoEm); })
+    .map(function (c) {
+      var b = boloes.filter(function (x) { return x.id === c.bolaoId; })[0];
+      var u = usuarios.filter(function (x) { return x.id === c.userId; })[0];
+      return {
+        id: c.id, bolaoId: c.bolaoId, bolaoNome: b ? b.nome : '(bolão removido)', valorCentavos: b ? b.valorCotaCentavos : 0,
+        status: c.status, pixGeradoEm: c.pixGeradoEm || 0, confirmadaEm: c.confirmadaEm || 0,
+        usuario: u ? { usuario: u.usuario, nome: u.nome } : { usuario: '?', nome: '(removido)' },
+        jogos: jogos.filter(function (j) { return j.cotaId === c.id; })
+          .sort(function (x, y) { return (x.criadoEm || 0) - (y.criadoEm || 0); })
+          .map(function (j) { return textoParaNumeros(j.numeros); })
+      };
+    });
+}
+
+function cotaPendenteOuErro(id) {
+  var c = lerTabela('Cotas').filter(function (x) { return x.id === id; })[0];
+  if (!c) throw erroNegocio('Cota não encontrada.');
+  if (c.status !== 'aguardando_pagamento') throw erroNegocio('Esta cota não está aguardando aprovação.');
+  return c;
+}
+
+function aprovarCota(d) {
+  return comLock(function () {
+    var agora = RELOGIO.agora();
+    var c = cotaPendenteOuErro(d.cotaId);
+    if (!Rateio.podeTransitar(c.status, 'confirmada')) throw erroNegocio('Transição não permitida.');
+    c.status = 'confirmada';
+    c.confirmadaEm = agora;
+    c.atualizadoEm = agora;
+    c.observacao = '';
+    atualizar('Cotas', c._linha, c);
+    return { id: c.id, status: c.status };
+  });
+}
+
+function reprovarCota(d) {
+  return comLock(function () {
+    var motivo = limparTexto(d.motivo, 200);
+    if (motivo.length < 3) throw erroNegocio('Informe o motivo da reprovação (mínimo 3 caracteres).');
+    var agora = RELOGIO.agora();
+    var c = cotaPendenteOuErro(d.cotaId);
+    if (!Rateio.podeTransitar(c.status, 'completa')) throw erroNegocio('Transição não permitida.');
+    c.status = 'completa';
+    c.pixGeradoEm = '';
+    c.atualizadoEm = agora;
+    c.observacao = motivo;
+    atualizar('Cotas', c._linha, c);
+    return { id: c.id, status: c.status };
+  });
+}
+
+// ----- página pública -----
+function nomeAbreviado(nome) {
+  var p = String(nome).trim().split(/\s+/);
+  if (p.length < 2) return p[0] || '';
+  return p[0] + ' ' + p[p.length - 1].charAt(0).toUpperCase() + '.';
+}
+
+/** Só participantes aprovados; nome abreviado, sem usuário nem contato. */
+function paginaPublica() {
+  var cotas = lerTabela('Cotas').filter(function (c) { return c.status === 'confirmada'; });
+  var jogos = lerTabela('Jogos');
+  var usuarios = lerTabela('Usuarios');
+  return lerTabela('Boloes')
+    .filter(function (b) { return b.status === 'aberto' || b.status === 'fechado'; })
+    .map(function (b) {
+      var minhas = cotas.filter(function (c) { return c.bolaoId === b.id; })
+        .sort(function (x, y) { return (x.confirmadaEm || 0) - (y.confirmadaEm || 0); });
+      var mod = Regras.obterModalidade(b.modalidade);
+      return {
+        id: b.id, nome: b.nome, modalidade: b.modalidade, modalidadeNome: mod ? mod.nome : b.modalidade,
+        qtdNumeros: b.qtdNumeros, jogosPorCota: b.jogosPorCota, valorCotaCentavos: b.valorCotaCentavos,
+        limiteCotas: b.limiteCotas, prazo: b.prazo, status: b.status, confirmadas: minhas.length,
+        participantes: minhas.map(function (c) {
+          var u = usuarios.filter(function (x) { return x.id === c.userId; })[0];
+          return {
+            nome: u ? nomeAbreviado(u.nome) : 'Participante',
+            jogos: jogos.filter(function (j) { return j.cotaId === c.id; })
+              .sort(function (x, y) { return (x.criadoEm || 0) - (y.criadoEm || 0); })
+              .map(function (j) { return textoParaNumeros(j.numeros); })
+          };
+        })
+      };
+    });
 }
 

@@ -6,11 +6,26 @@ var ACOES = {
   'eu':                    { nivel: 'usuario', fn: function (d, u) { return usuarioPublico(u); } },
   'modalidades':           { nivel: 'usuario', fn: function () { return modalidadesDisponiveis(); } },
   'boloes.abertos':        { nivel: 'usuario', fn: function () { return boloesAbertos(); } },
+  'publico.config':        { nivel: 'publico', fn: function () { return configPublica(); } },
+  'publico.jogos':         { nivel: 'publico', fn: function () { return paginaPublica(); } },
+  'imagem.obter':          { nivel: 'publico', fn: function (d) { return obterImagem(d); } },
+  'cotas.gerarPix':        { nivel: 'usuario', fn: function (d, u) { return gerarPixCota(u, d); } },
+  'cotas.pix':             { nivel: 'usuario', fn: function (d, u) { return pixDaMinhaCota(u, d); } },
   'cotas.minhas':          { nivel: 'usuario', fn: function (d, u) { return minhasCotas(u); } },
   'cotas.criar':           { nivel: 'usuario', fn: function (d, u) { return criarCota(u, d); } },
   'cotas.cancelar':        { nivel: 'usuario', fn: function (d, u) { return cancelarCota(u, d); } },
   'jogos.salvar':          { nivel: 'usuario', fn: function (d, u) { return salvarJogo(u, d); } },
   'jogos.remover':         { nivel: 'usuario', fn: function (d, u) { return removerJogo(u, d); } },
+  'admin.cotas.listar':    { nivel: 'admin',   fn: function (d) { return listarCotasAdmin(d); } },
+  'admin.cotas.aprovar':   { nivel: 'admin',   fn: function (d) { return aprovarCota(d); } },
+  'admin.cotas.reprovar':  { nivel: 'admin',   fn: function (d) { return reprovarCota(d); } },
+  'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
+  'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
+  'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
+  'admin.imagem.remover':  { nivel: 'admin',   fn: function (d) { return removerImagemUso(d); } },
+  'admin.banners.atualizar': { nivel: 'admin', fn: function (d) { return atualizarBanner(d); } },
+  'admin.banners.mover':   { nivel: 'admin',   fn: function (d) { return moverBanner(d); } },
+  'admin.banners.remover': { nivel: 'admin',   fn: function (d) { return removerBanner(d); } },
   'admin.convites.criar':  { nivel: 'admin',   fn: function (d, u) { return criarConvite(u, d); } },
   'admin.convites.listar': { nivel: 'admin',   fn: function () { return listarConvites(); } },
   'admin.convites.revogar': { nivel: 'admin',  fn: function (d) { return revogarConvite(d); } },
@@ -51,6 +66,9 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
+var VERSAO_API = '5';
+
+/** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {
-  return responder({ ok: true, servico: 'bolao-api' });
+  return responder({ ok: true, servico: 'bolao-api', versao: VERSAO_API });
 }

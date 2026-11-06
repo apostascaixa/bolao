@@ -93,6 +93,7 @@ test('transições permitidas e proibidas', () => {
   assert.equal(T.podeTransitar('completa', 'aguardando_pagamento'), true);
   assert.equal(T.podeTransitar('aguardando_pagamento', 'confirmada'), true);
   assert.equal(T.podeTransitar('aguardando_pagamento', 'rascunho'), true);
+  assert.equal(T.podeTransitar('aguardando_pagamento', 'completa'), true); // reprovação do administrador
   assert.equal(T.podeTransitar('rascunho', 'confirmada'), false); // não pula pagamento
   assert.equal(T.podeTransitar('rascunho', 'aguardando_pagamento'), false); // exige cota completa
   assert.equal(T.podeTransitar('confirmada', 'rascunho'), false);

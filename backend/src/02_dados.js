@@ -1,13 +1,30 @@
 // ===== Acesso à planilha =====
+var PLANILHA_EM_CACHE = null; // vale só durante uma execução (cada chamada à API reinicia as variáveis globais)
+
 function planilha() {
+  if (PLANILHA_EM_CACHE) return PLANILHA_EM_CACHE;
   var id = props().getProperty('PLANILHA_ID');
   if (!id) throw new Error('Execute configurar() primeiro.');
-  return SpreadsheetApp.openById(id);
+  PLANILHA_EM_CACHE = SpreadsheetApp.openById(id);
+  return PLANILHA_EM_CACHE;
 }
 
+/** Devolve a aba; se ela ainda não existe (versão nova do sistema), cria com o cabeçalho. */
 function aba(nome) {
-  var s = planilha().getSheetByName(nome);
-  if (!s) throw new Error('Aba ausente: ' + nome + '. Execute configurar().');
+  var ss = planilha();
+  var s = ss.getSheetByName(nome);
+  if (!s) {
+    var cols = CFG.ABAS[nome];
+    if (!cols) throw new Error('Aba desconhecida: ' + nome);
+    try {
+      s = ss.insertSheet(nome);
+    } catch (e) {
+      s = ss.getSheetByName(nome); // outra execução criou ao mesmo tempo
+      if (!s) throw e;
+    }
+    s.getRange(1, 1, 1, cols.length).setValues([cols]);
+    s.setFrozenRows(1);
+  }
   return s;
 }
 

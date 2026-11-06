@@ -39,7 +39,7 @@
   var TRANSICOES = {
     rascunho: ['completa', 'expirada'],
     completa: ['rascunho', 'aguardando_pagamento', 'expirada'],
-    aguardando_pagamento: ['confirmada', 'rascunho', 'expirada'],
+    aguardando_pagamento: ['confirmada', 'completa', 'rascunho', 'expirada'],
     confirmada: [],
     expirada: []
   };
