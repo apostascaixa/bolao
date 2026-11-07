@@ -3,7 +3,7 @@
 Sistema de organização de bolão em grupo. Não é um canal oficial de apostas da CAIXA.
 
 ## Estrutura
-- `shared/` regras das modalidades, rateio e geração de PIX (testados)
+- `shared/` regras das modalidades (com faixas de premiação), rateio, geração de PIX e conferência de resultados (testados)
 - `backend/src/` código do Apps Script em partes; `backend/Codigo.gs` é o arquivo gerado (único) que se cola no Apps Script
 - `frontend/` telas (HTML/CSS/JS puros) publicadas no Netlify; a URL da API fica em `frontend/config.js`; `publico.html` é a página pública dos jogos aprovados
 - `tests/` testes automatizados
@@ -18,3 +18,12 @@ Requer Node 18 ou superior.
 ## Segurança
 Repositório público. Nunca versionar chave PIX, senhas ou dados de participantes.
 Segredos ficam nas Propriedades do Script do Apps Script.
+
+## Recursos
+- Participante: escolha de jogos em volante (salva em lote, em segundo plano), PIX e acompanhamento da aprovação
+- Administrador: bolões, aprovação de pagamentos, **Auditoria** (comprovantes e jogos registrados na lotérica), **Conferência** de resultado por concurso, convites e configurações (PIX, banners, carrossel)
+- Página pública (`publico.html`): comprovante do grupo por participante aprovado
+
+## Observação sobre a lotérica
+Os comprovantes da página pública são internos do grupo e não substituem o recibo oficial.
+O selo "registrado oficialmente" só aparece depois que o administrador envia os comprovantes na Auditoria.

@@ -128,10 +128,14 @@ function paginaPublica() {
         id: b.id, nome: b.nome, modalidade: b.modalidade, modalidadeNome: mod ? mod.nome : b.modalidade,
         qtdNumeros: b.qtdNumeros, jogosPorCota: b.jogosPorCota, valorCotaCentavos: b.valorCotaCentavos,
         limiteCotas: b.limiteCotas, prazo: b.prazo, status: b.status, confirmadas: minhas.length,
-        participantes: minhas.map(function (c) {
+        concurso: b.concurso || 0, registradoEm: b.registradoEm || 0,
+        participantes: minhas.map(function (c, idx) {
           var u = usuarios.filter(function (x) { return x.id === c.userId; })[0];
+          var cod = sha256Hex('recibo|' + c.id).substring(0, 16).toUpperCase();
           return {
             nome: u ? nomeAbreviado(u.nome) : 'Participante',
+            cotaNumero: idx + 1, confirmadaEm: c.confirmadaEm || 0,
+            codigo: cod.substring(0, 4) + '-' + cod.substring(4, 8) + '-' + cod.substring(8, 12) + '-' + cod.substring(12, 16),
             jogos: jogos.filter(function (j) { return j.cotaId === c.id; })
               .sort(function (x, y) { return (x.criadoEm || 0) - (y.criadoEm || 0); })
               .map(function (j) { return textoParaNumeros(j.numeros); })

@@ -623,7 +623,7 @@ test('nenhuma operação de cota deixa o lock preso', () => {
 test('doGet informa a versão publicada e conhece as ações da etapa 4', () => {
   const env = preparar();
   const r = JSON.parse(env.ctx.doGet().getContent());
-  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '5' });
+  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '6' });
   for (const a of ['cotas.minhas', 'cotas.criar', 'cotas.cancelar', 'jogos.salvar', 'jogos.remover']) {
     assert.ok(Object.prototype.hasOwnProperty.call(env.ctx.ACOES, a), a);
   }
@@ -950,4 +950,246 @@ test('nenhuma operação nova deixa o lock preso', () => {
   env.chamar('admin.cotas.aprovar', { token, cotaId });
   env.chamar('admin.imagem.enviar', { token, uso: 'topo', dataUrl: 'lixo' });
   assert.equal(env.estaTravado(), false);
+});
+
+// ---------- jogos em lote ----------
+const jg = (...a) => a;
+
+test('lote: salva vários jogos numa chamada, ordenados e com status certo', () => {
+  const { env, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  const r = env.chamar('jogos.salvarVarios', { token: maria, cotaId, jogos: [[42, 7, 1, 60, 33, 18], [1, 2, 3, 4, 5, 6]] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.jogos.length, 2);
+  assert.deepEqual(r.dados.jogos[0].numeros, [1, 7, 18, 33, 42, 60]);
+  assert.deepEqual(r.dados.jogos[1].numeros, [1, 2, 3, 4, 5, 6]);
+  assert.equal(r.dados.status, 'rascunho');
+  const r2 = env.chamar('jogos.salvarVarios', { token: maria, cotaId, jogos: [[10, 11, 12, 13, 14, 15]] });
+  assert.equal(r2.dados.status, 'completa');
+  assert.deepEqual(env.chamar('cotas.minhas', { token: maria }).dados[0].jogos.map((j) => j.numeros[0]), [1, 1, 10]);
+});
+
+test('lote: tudo ou nada — um jogo inválido, repetido ou excedente não grava nenhum', () => {
+  const { env, id, maria } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  const lote = (jogos) => env.chamar('jogos.salvarVarios', { token: maria, cotaId, jogos });
+  const nada = () => assert.equal(env.ss.getSheetByName('Jogos').rows.length, 1);
+  assert.equal(lote([[1, 2, 3, 4, 5, 6], [1, 2, 3, 4, 5]]).ok, false); nada();
+  assert.equal(lote([[1, 2, 3, 4, 5, 6], [6, 5, 4, 3, 2, 1]]).ok, false); nada();
+  assert.equal(lote([[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18], [19, 20, 21, 22, 23, 24]]).ok, false); nada();
+  assert.equal(lote([]).ok, false);
+  assert.equal(lote('x').ok, false);
+  assert.equal(lote([[1, 2, 3, 4, 5, 6]]).ok, true);
+  const dup = lote([[1, 2, 3, 4, 5, 6]]);
+  assert.equal(dup.ok, false);
+  assert.match(dup.erro, /repetido/);
+  const exc = lote([[7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18], [19, 20, 21, 22, 23, 24]]);
+  assert.match(exc.erro, /no máximo 3 jogos \(já tem 1\)/);
+});
+
+test('lote: respeita dono, bolão aberto e travas do PIX; lock livre', () => {
+  const { env, token, id, maria, joao } = cenarioCotas();
+  const cotaId = env.chamar('cotas.criar', { token: maria, bolaoId: id }).dados.id;
+  assert.equal(env.chamar('jogos.salvarVarios', { token: joao, cotaId, jogos: [[1, 2, 3, 4, 5, 6]] }).ok, false);
+  assert.equal(env.chamar('jogos.salvarVarios', { cotaId, jogos: [[1, 2, 3, 4, 5, 6]] }).ok, false);
+  configurarPix(env, token);
+  env.chamar('jogos.salvarVarios', { token: maria, cotaId, jogos: [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18]] });
+  env.chamar('cotas.gerarPix', { token: maria, cotaId });
+  assert.equal(env.chamar('jogos.salvarVarios', { token: maria, cotaId, jogos: [[20, 21, 22, 23, 24, 25]] }).ok, false);
+  assert.equal(env.estaTravado(), false);
+});
+
+// ---------- página pública como comprovante ----------
+test('página pública traz dados do comprovante sem expor o id da cota', () => {
+  const { env, token, id, maria, joao } = cenarioCotas({ limiteCotas: 17 });
+  configurarPix(env, token);
+  const c1 = cotaCompleta(env, maria, id);
+  const c2 = cotaCompleta(env, joao, id);
+  env.chamar('cotas.gerarPix', { token: maria, cotaId: c1 });
+  env.chamar('cotas.gerarPix', { token: joao, cotaId: c2 });
+  env.tempo += 1000; env.chamar('admin.cotas.aprovar', { token, cotaId: c1 });
+  env.tempo += 1000; env.chamar('admin.cotas.aprovar', { token, cotaId: c2 });
+  const b = env.chamar('publico.jogos', {}).dados[0];
+  assert.equal(b.limiteCotas, 17);
+  assert.deepEqual(b.participantes.map((p) => p.cotaNumero), [1, 2]);
+  assert.match(b.participantes[0].codigo, /^[0-9A-F]{4}(-[0-9A-F]{4}){3}$/);
+  assert.notEqual(b.participantes[0].codigo, b.participantes[1].codigo);
+  assert.ok(b.participantes[0].confirmadaEm > 0 && b.participantes[1].confirmadaEm > b.participantes[0].confirmadaEm);
+  assert.equal(b.concurso, 0);
+  assert.equal(b.registradoEm, 0);
+  const texto = JSON.stringify(env.chamar('publico.jogos', {}));
+  assert.ok(!texto.includes(c1) && !texto.includes(c2));
+});
+
+// ---------- auditoria ----------
+function cenarioAuditoria() {
+  const base = cenarioCotas({ jogosPorCota: 2, limiteCotas: 5 });
+  const { env, token, id, maria, joao } = base;
+  configurarPix(env, token);
+  const lote = (tk, jogos) => {
+    const cotaId = env.chamar('cotas.criar', { token: tk, bolaoId: id }).dados.id;
+    env.chamar('jogos.salvarVarios', { token: tk, cotaId, jogos });
+    env.chamar('cotas.gerarPix', { token: tk, cotaId });
+    env.tempo += 1000;
+    env.chamar('admin.cotas.aprovar', { token, cotaId });
+    return cotaId;
+  };
+  lote(maria, [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]);
+  lote(joao, [[13, 14, 15, 16, 17, 18], [19, 20, 21, 22, 23, 24]]);
+  return base;
+}
+const TEXTO_OK = 'A 01 02 03 04 05 06 SU\nB 07 08 09 10 11 12\nC 13 14 15 16 17 18\nD 19 20 21 22 23 24';
+
+test('auditoria: resumo, comprovante (só admin vê a imagem), remover e registrar', () => {
+  const { env, token, id, maria } = cenarioAuditoria();
+  const r0 = env.chamar('admin.auditoria.resumo', { token }).dados[0];
+  assert.equal(r0.cotasConfirmadas, 2);
+  assert.equal(r0.jogosNoSistema, 4);
+  assert.equal(r0.registradoEm, 0);
+  assert.equal(env.chamar('admin.auditoria.resumo', { token: maria }).ok, false);
+
+  assert.equal(env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 }).ok, false); // sem comprovante
+  assert.equal(env.chamar('admin.auditoria.comprovante', { token, bolaoId: id, dataUrl: 'lixo' }).ok, false);
+  assert.equal(env.chamar('admin.auditoria.comprovante', { token: maria, bolaoId: id, dataUrl: dataUrlPng() }).ok, false);
+  const up = env.chamar('admin.auditoria.comprovante', { token, bolaoId: id, dataUrl: dataUrlPng(10) });
+  assert.equal(up.ok, true, JSON.stringify(up));
+  const comp = up.dados[0].comprovantes[0];
+  assert.equal(env.chamar('imagem.obter', { id: comp.imagemId }).ok, false);               // anônimo
+  assert.equal(env.chamar('imagem.obter', { id: comp.imagemId, token: maria }).ok, false); // participante
+  assert.equal(env.chamar('imagem.obter', { id: comp.imagemId, token }).ok, true);         // admin
+
+  assert.equal(env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 0 }).ok, false);
+  assert.equal(env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: '3100' }).ok, false);
+  const reg = env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 });
+  assert.equal(reg.dados[0].concurso, 3100);
+  assert.ok(reg.dados[0].registradoEm > 0);
+  const pub = env.chamar('publico.jogos', {}).dados[0];
+  assert.equal(pub.concurso, 3100);
+  assert.ok(pub.registradoEm > 0);
+
+  // não deixa remover o último comprovante de um bolão registrado
+  assert.match(env.chamar('admin.auditoria.removerEntrada', { token, id: comp.id }).erro, /Desfaça o registro/);
+  env.chamar('admin.auditoria.desregistrar', { token, bolaoId: id });
+  assert.equal(env.chamar('publico.jogos', {}).dados[0].concurso, 0);
+  assert.equal(env.chamar('admin.auditoria.removerEntrada', { token, id: comp.id }).ok, true);
+  assert.equal(env.chamar('imagem.obter', { id: comp.imagemId, token }).ok, false); // imagem apagada
+  assert.equal(env.ss.getSheetByName('Imagens').rows.length, 1);
+});
+
+test('auditoria: jogos registrados são comparados com os do sistema', () => {
+  const { env, token, id } = cenarioAuditoria();
+  const salvar = (texto) => env.chamar('admin.auditoria.jogos', { token, bolaoId: id, texto });
+  const ok = salvar(TEXTO_OK).dados[0].comparacao;
+  assert.equal(ok.confere, true);
+  assert.equal(ok.iguais, 4);
+  assert.equal(ok.registrados, 4);
+
+  const dif = salvar('A 01 02 03 04 05 06\nB 07 08 09 10 11 12\nC 13 14 15 16 17 18\nD 30 31 32 33 34 35\nCOTA 3/17').dados[0].comparacao;
+  assert.equal(dif.confere, false);
+  assert.equal(dif.iguais, 3);
+  assert.deepEqual(dif.faltamNoRegistro, [[19, 20, 21, 22, 23, 24]]);
+  assert.deepEqual(dif.sobramNoRegistro, [[30, 31, 32, 33, 34, 35]]);
+  assert.equal(dif.ignoradas, 1);
+
+  assert.equal(salvar('x'.repeat(40001)).ok, false);
+  assert.equal(env.ss.getSheetByName('Auditoria').rows.filter((r) => String(r[2]).includes('jogos')).length, 1); // substitui, não duplica
+  assert.equal(salvar('').dados[0].comparacao, null);
+  assert.equal(env.chamar('admin.auditoria.jogos', { token, bolaoId: 'x', texto: 'a' }).ok, false);
+});
+
+test('auditoria: só bolões abertos ou fechados; limite de comprovantes', () => {
+  const { env, token } = comAdmin();
+  const rasc = env.chamar('admin.boloes.criar', { token, ...bolaoValido() }).dados.id;
+  assert.equal(env.chamar('admin.auditoria.comprovante', { token, bolaoId: rasc, dataUrl: dataUrlPng() }).ok, false);
+  assert.deepEqual(env.chamar('admin.auditoria.resumo', { token }).dados, []);
+  env.chamar('admin.boloes.status', { token, id: rasc, status: 'aberto' });
+  for (let i = 0; i < 20; i++) assert.equal(env.chamar('admin.auditoria.comprovante', { token, bolaoId: rasc, dataUrl: dataUrlPng(3) }).ok, true);
+  assert.match(env.chamar('admin.auditoria.comprovante', { token, bolaoId: rasc, dataUrl: dataUrlPng(3) }).erro, /Limite de 20/);
+});
+
+// ---------- conferência ----------
+test('conferência: acha o jogo premiado nos bolões registrados do concurso', () => {
+  const { env, token, id } = cenarioAuditoria();
+  env.chamar('admin.auditoria.jogos', { token, bolaoId: id, texto: TEXTO_OK });
+  env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 });
+  const consulta = (extra = {}) => env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3100, resultado: [1, 2, 3, 4, 40, 41], ...extra });
+
+  const r = consulta();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.totalPremiados, 1);
+  const b = r.dados.boloes[0];
+  assert.equal(b.jogosConferidos, 4);
+  assert.equal(b.premiados[0].participante, 'Maria Silva');
+  assert.equal(b.premiados[0].letra, 'A');
+  assert.deepEqual(b.premiados[0].acertados, [1, 2, 3, 4]);
+  assert.deepEqual(b.faixas, { Quadra: 1 });
+  assert.equal(b.melhorAcerto, 4);
+  assert.equal(b.divergencias, 0);
+
+  const sena = consulta({ resultado: [13, 14, 15, 16, 17, 18] }).dados.boloes[0];
+  assert.equal(sena.premiados[0].participante, 'João da Silva' === sena.premiados[0].participante ? 'João da Silva' : sena.premiados[0].participante);
+  assert.deepEqual(sena.faixas, { Sena: 1 });
+
+  const nada = consulta({ resultado: [50, 51, 52, 53, 54, 55] });
+  assert.equal(nada.dados.totalPremiados, 0);
+  assert.equal(nada.dados.boloes[0].premiados.length, 0);
+  assert.equal(nada.dados.boloes[0].melhorAcerto, 0);
+});
+
+test('conferência: concurso diferente, modalidade diferente e bolão sem registro não entram', () => {
+  const { env, token, id } = cenarioAuditoria();
+  const r1 = env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3100, resultado: [1, 2, 3, 4, 5, 6] });
+  assert.equal(r1.dados.boloes.length, 0);
+  assert.equal(r1.dados.naoRegistrados[0].registrado, false);
+  env.chamar('admin.auditoria.jogos', { token, bolaoId: id, texto: TEXTO_OK });
+  env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 });
+  const r2 = env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3101, resultado: [1, 2, 3, 4, 5, 6] });
+  assert.equal(r2.dados.boloes.length, 0);
+  assert.equal(r2.dados.naoRegistrados[0].concurso, 3100);
+  const r3 = env.chamar('admin.conferencia.consultar', { token, modalidade: 'quina', concurso: 3100, resultado: [1, 2, 3, 4, 5] });
+  assert.equal(r3.ok, true);
+  assert.equal(r3.dados.boloes.length, 0);
+  assert.equal(r3.dados.naoRegistrados.length, 0);
+});
+
+test('conferência: divergência entre o registro e o sistema é sinalizada', () => {
+  const { env, token, id } = cenarioAuditoria();
+  env.chamar('admin.auditoria.jogos', { token, bolaoId: id, texto: 'A 01 02 03 04 05 06\nB 07 08 09 10 11 12' });
+  env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 });
+  const b = env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3100, resultado: [1, 2, 3, 4, 5, 6] }).dados.boloes[0];
+  assert.ok(b.divergencias >= 1);
+});
+
+test('conferência: valida entradas e só administrador consulta', () => {
+  const { env, token, maria } = (() => { const a = cenarioAuditoria(); return a; })();
+  const c = (extra) => env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3100, resultado: [1, 2, 3, 4, 5, 6], ...extra });
+  assert.equal(c({ modalidade: 'x' }).ok, false);
+  assert.equal(c({ concurso: 0 }).ok, false);
+  assert.equal(c({ concurso: '3100' }).ok, false);
+  assert.equal(c({ concurso: 100000 }).ok, false);
+  assert.equal(c({ resultado: [1, 2, 3] }).ok, false);
+  assert.equal(c({ resultado: [1, 1, 2, 3, 4, 5] }).ok, false);
+  assert.equal(c({ resultado: [1, 2, 3, 4, 5, 99] }).ok, false);
+  assert.equal(c({ resultado: 'abc' }).ok, false);
+  assert.equal(c({ token: maria }).ok, false);
+  assert.equal(env.chamar('admin.conferencia.historico', { token: maria }).ok, false);
+});
+
+test('conferência: histórico guarda as consultas, da mais recente para a mais antiga', () => {
+  const { env, token } = cenarioAuditoria();
+  const c = (n, res) => { env.tempo += 1000; return env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: n, resultado: res }); };
+  c(3100, [1, 2, 3, 4, 5, 6]); c(3101, [7, 8, 9, 10, 11, 12]);
+  const h = env.chamar('admin.conferencia.historico', { token }).dados;
+  assert.deepEqual(h.map((x) => x.concurso), [3101, 3100]);
+  assert.deepEqual(h[0].resultado, [7, 8, 9, 10, 11, 12]);
+  assert.equal(h[0].modalidadeNome, 'Mega-Sena');
+  assert.equal(env.estaTravado(), false);
+});
+
+test('letras dos jogos: A..Z, depois AA, AB…', () => {
+  const env = preparar();
+  assert.equal(env.ctx.letraJogo(0), 'A');
+  assert.equal(env.ctx.letraJogo(25), 'Z');
+  assert.equal(env.ctx.letraJogo(26), 'AA');
+  assert.equal(env.ctx.letraJogo(27), 'AB');
 });

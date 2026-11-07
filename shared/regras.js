@@ -1,18 +1,22 @@
 /**
  * Regras das modalidades e validação de jogos e bolões.
  * Funciona em Node (testes), navegador e Apps Script (V8).
- * Os valores padrão abaixo devem ser conferidos com as regras oficiais
- * da CAIXA antes de abrir inscrições; o administrador pode ajustá-los.
+ * Os valores padrão abaixo (inclusive as faixas de premiação) devem ser conferidos
+ * com as regras oficiais da CAIXA antes de abrir inscrições.
  */
 (function (root) {
   'use strict';
 
   // universo: números de 1 a `maximo`; dezenas: quantidade permitida por jogo.
   var MODALIDADES = {
-    'mega-sena':  { nome: 'Mega-Sena',   minimo: 1, maximo: 60, dezenasMin: 6,  dezenasMax: 20 },
-    'lotofacil':  { nome: 'Lotofácil',   minimo: 1, maximo: 25, dezenasMin: 15, dezenasMax: 20 },
-    'quina':      { nome: 'Quina',       minimo: 1, maximo: 80, dezenasMin: 5,  dezenasMax: 15 },
-    'dia-de-sorte': { nome: 'Dia de Sorte', minimo: 1, maximo: 31, dezenasMin: 7, dezenasMax: 15 }
+    'mega-sena': { nome: 'Mega-Sena', minimo: 1, maximo: 60, dezenasMin: 6, dezenasMax: 20, sorteados: 6,
+      faixas: [{ acertos: 6, nome: 'Sena' }, { acertos: 5, nome: 'Quina' }, { acertos: 4, nome: 'Quadra' }] },
+    'lotofacil': { nome: 'Lotofácil', minimo: 1, maximo: 25, dezenasMin: 15, dezenasMax: 20, sorteados: 15,
+      faixas: [{ acertos: 15, nome: '15 acertos' }, { acertos: 14, nome: '14 acertos' }, { acertos: 13, nome: '13 acertos' }, { acertos: 12, nome: '12 acertos' }, { acertos: 11, nome: '11 acertos' }] },
+    'quina': { nome: 'Quina', minimo: 1, maximo: 80, dezenasMin: 5, dezenasMax: 15, sorteados: 5,
+      faixas: [{ acertos: 5, nome: 'Quina' }, { acertos: 4, nome: 'Quadra' }, { acertos: 3, nome: 'Terno' }, { acertos: 2, nome: 'Duque' }] },
+    'dia-de-sorte': { nome: 'Dia de Sorte', minimo: 1, maximo: 31, dezenasMin: 7, dezenasMax: 15, sorteados: 7,
+      faixas: [{ acertos: 7, nome: '7 acertos' }, { acertos: 6, nome: '6 acertos' }, { acertos: 5, nome: '5 acertos' }, { acertos: 4, nome: '4 acertos' }] }
   };
 
   function obterModalidade(id) {

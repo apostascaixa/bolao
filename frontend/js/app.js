@@ -8,7 +8,7 @@
     usuario: null, abaAcesso: 'entrar', codigoConvite: '', aba: 'boloes',
     boloes: [], convites: [], modalidades: [], edicao: null, novoConvite: null,
     abertos: [], minhasCotas: [], bolaoSel: null, volante: { sel: [], editando: null }, verMinhas: false, menuAberto: false,
-    cotasAdmin: [], cfg: null, pixInfo: {},
+    cotasAdmin: [], cfg: null, pixInfo: {}, auditoria: [], audBolao: null, historicoConf: [], refrescar: null,
     pub: { topo: { imagemId: '', link: '' }, carrossel: { segundos: 6, incluirBoloes: true }, banners: [] }
   };
 
@@ -71,6 +71,7 @@
         h('button', { role: 'tab', 'aria-selected': String(abaEntrar), class: abaEntrar ? 'ativa' : '', onclick: function () { estado.abaAcesso = 'entrar'; renderAcesso(); } }, 'Entrar'),
         h('button', { role: 'tab', 'aria-selected': String(!abaEntrar), class: !abaEntrar ? 'ativa' : '', onclick: function () { estado.abaAcesso = 'cadastrar'; renderAcesso(); } }, 'Tenho um convite')),
       abaEntrar ? formEntrar : formCad,
+      h('a', { class: 'botao-link largo', href: 'publico.html' }, 'Ver a página pública dos jogos'),
       h('p', { class: 'aviso-legal' }, 'Este sistema organiza o grupo. Não é um canal oficial de apostas da CAIXA.')));
 
     function onEntrar(ev) {
@@ -160,6 +161,8 @@
   }
 
   async function sair() {
+    if (fila.pend.length > 0) { aviso('Salvando seus jogos antes de sair…'); await esperarFila(); }
+    fila.pend = []; fila.erro = ''; fila.cotaId = null;
     try { await API.chamar('logout', {}); } catch (e) { /* sair localmente mesmo assim */ }
     API.guardarToken('');
     estado.usuario = null;
@@ -172,30 +175,47 @@
   }
 
   // ---------- painel ----------
+  /** Auditoria e Conferência buscam os dados no servidor ao abrir a aba. */
+  function irParaAba(aba) {
+    estado.aba = aba;
+    estado.edicao = null;
+    if (aba === 'auditoria' || aba === 'conferencia') {
+      executar(async function () {
+        if (aba === 'auditoria') estado.auditoria = await API.chamar('admin.auditoria.resumo', {});
+        else estado.historicoConf = await API.chamar('admin.conferencia.historico', {});
+        renderPainel();
+      });
+    } else renderPainel();
+  }
+
   function renderPainel() {
+    estado.refrescar = null;
     Car.parar();
     var admin = estado.usuario.papel === 'admin';
     var pendentes = estado.cotasAdmin.filter(function (c) { return c.status === 'aguardando_pagamento'; }).length;
     var abas = admin
-      ? [['boloes', 'Administrar bolões'], ['aprovacoes', 'Aprovações' + (pendentes ? ' (' + pendentes + ')' : '')], ['convites', 'Convites'], ['config', 'Configurações'], ['participar', 'Participar']]
+      ? [['boloes', 'Administrar bolões'], ['aprovacoes', 'Aprovações' + (pendentes ? ' (' + pendentes + ')' : '')], ['auditoria', 'Auditoria'], ['conferencia', 'Conferência'], ['convites', 'Convites'], ['config', 'Configurações'], ['participar', 'Participar']]
       : [];
     var conteudo;
     if (admin && estado.aba === 'convites') conteudo = telaConvites();
     else if (admin && estado.aba === 'boloes') conteudo = telaBoloesAdmin();
     else if (admin && estado.aba === 'aprovacoes') conteudo = window.BolaoAdmin.telaAprovacoes(ctxAdmin);
     else if (admin && estado.aba === 'config') conteudo = window.BolaoAdmin.telaConfig(ctxAdmin);
+    else if (admin && estado.aba === 'auditoria') conteudo = window.BolaoAdmin.telaAuditoria(ctxAdmin);
+    else if (admin && estado.aba === 'conferencia') conteudo = window.BolaoAdmin.telaConferencia(ctxAdmin);
     else conteudo = telaParticipar();
 
     montar(
       h('header', { class: 'topo' },
         h('strong', {}, 'Bolão da Sorte'),
         h('span', { class: 'quem' }, estado.usuario.nome + (admin ? ' (administrador)' : '')),
+        h('a', { class: 'link-publico', href: 'publico.html', target: '_blank', rel: 'noopener' }, 'Página pública'),
         h('button', { class: 'link', onclick: sair }, 'Sair')),
       h('main', { class: 'painel' },
         abas.length > 0 ? h('div', { class: 'abas', role: 'tablist' }, abas.map(function (a) {
           var ativa = estado.aba === a[0];
           return h('button', { role: 'tab', 'aria-selected': String(ativa), class: ativa ? 'ativa' : '',
-            onclick: function () { estado.aba = a[0]; estado.edicao = null; renderPainel(); } }, a[1]);
+            onclick: function () { irParaAba(a[0]); } }, a[1]);
         })) : null,
         conteudo));
   }
@@ -476,24 +496,85 @@
     estado.minhasCotas = estado.minhasCotas.map(function (c) { return c.id === nova.id ? nova : c; });
   }
 
+  // ---- fila de envio: o jogo aparece na hora e é salvo em lote, em segundo plano ----
+  var fila = { cotaId: null, pend: [], enviando: false, erro: '', timer: null };
+
+  function pendentesDaCota(cota) { return fila.cotaId === cota.id ? fila.pend : []; }
+
+  function jogosVisiveis(cota) {
+    return cota.jogos.map(function (j) { return { id: j.id, numeros: j.numeros, pendente: false }; })
+      .concat(pendentesDaCota(cota).map(function (n) { return { numeros: n, pendente: true }; }));
+  }
+
+  function agendarEnvio(cotaId, imediato) {
+    clearTimeout(fila.timer);
+    fila.timer = setTimeout(function () { enviarFila(cotaId); }, imediato ? 0 : 700);
+  }
+
+  async function enviarFila(cotaId) {
+    if (fila.enviando || fila.cotaId !== cotaId || fila.pend.length === 0) return;
+    fila.enviando = true;
+    fila.erro = '';
+    var lote = fila.pend.slice();
+    var antes = estado.minhasCotas.filter(function (c) { return c.id === cotaId; })[0];
+    var statusAntes = antes ? antes.status : '';
+    var nova = null;
+    try {
+      nova = await API.chamar('jogos.salvarVarios', { cotaId: cotaId, jogos: lote });
+      fila.pend = fila.pend.slice(lote.length);
+      substituirCota(nova);
+    } catch (e) {
+      if (e && e.sessaoInvalida) {
+        fila.pend = [];
+        API.guardarToken('');
+        estado.usuario = null;
+        fila.enviando = false;
+        renderAcesso();
+        aviso(e.message, true);
+        return;
+      }
+      fila.erro = (e && e.message) || 'Não foi possível salvar os jogos.';
+    }
+    fila.enviando = false;
+    if (!fila.erro && fila.pend.length > 0) return enviarFila(cotaId); // chegaram jogos durante o envio
+    if (!estado.usuario) return;
+    if (fila.erro || (nova && nova.status !== statusAntes)) { if (emTelaParticipar()) renderPainel(); }
+    else if (estado.refrescar) estado.refrescar();
+  }
+
+  async function esperarFila() {
+    var inicio = Date.now();
+    while ((fila.enviando || fila.pend.length > 0) && !fila.erro && Date.now() - inicio < 20000) {
+      if (!fila.enviando && fila.cotaId) enviarFila(fila.cotaId);
+      await new Promise(function (r) { setTimeout(r, 150); });
+    }
+  }
+
+  window.addEventListener('beforeunload', function (ev) {
+    if (fila.pend.length > 0) { ev.preventDefault(); ev.returnValue = ''; }
+  });
+
   function listaJogos(cota, editavel) {
     var v = estado.volante;
+    var visiveis = jogosVisiveis(cota);
+    var ocupado = fila.enviando || fila.pend.length > 0;
     return h('section', { class: 'cartao' },
       h('h3', {}, 'Seus jogos'),
-      cota.jogos.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum jogo ainda. Escolha os números acima e adicione.')
-        : h('ol', { class: 'jogos' }, cota.jogos.map(function (j, i) {
-          return h('li', { class: v.editando === j.id ? 'em-edicao' : '' },
+      visiveis.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum jogo ainda. Escolha os números acima e adicione.')
+        : h('ol', { class: 'jogos' }, visiveis.map(function (j, i) {
+          return h('li', { class: (v.editando && v.editando === j.id ? 'em-edicao ' : '') + (j.pendente ? 'pendente' : '') },
             h('span', { class: 'jogo-n' }, 'Jogo ' + (i + 1)),
-            h('span', { class: 'chips' }, j.numeros.map(function (n) { return h('span', { class: 'chip' }, n < 10 ? '0' + n : String(n)); })),
-            editavel ? h('span', { class: 'jogo-acoes' },
-              h('button', { onclick: function () { estado.volante = { sel: j.numeros.slice(), editando: j.id }; renderPainel(); window.scrollTo(0, 0); } }, 'Editar'),
-              h('button', { class: 'perigo', onclick: function (ev) {
-                executar(async function () {
-                  substituirCota(await API.chamar('jogos.remover', { cotaId: cota.id, jogoId: j.id }));
-                  if (estado.volante.editando === j.id) estado.volante = { sel: [], editando: null };
-                  renderPainel();
-                }, ev.target);
-              } }, 'Remover')) : null);
+            h('span', { class: 'chips' }, j.numeros.map(function (n) { return h('span', { class: 'chip' }, U.dezena(n)); })),
+            j.pendente ? h('span', { class: 'salvando' }, 'salvando…')
+              : (editavel ? h('span', { class: 'jogo-acoes' },
+                h('button', { disabled: ocupado, onclick: function () { estado.volante = { sel: j.numeros.slice(), editando: j.id }; renderPainel(); window.scrollTo(0, 0); } }, 'Editar'),
+                h('button', { class: 'perigo', disabled: ocupado, onclick: function (ev) {
+                  executar(async function () {
+                    substituirCota(await API.chamar('jogos.remover', { cotaId: cota.id, jogoId: j.id }));
+                    if (estado.volante.editando === j.id) estado.volante = { sel: [], editando: null };
+                    renderPainel();
+                  }, ev.target);
+                } }, 'Remover')) : null));
         })));
   }
 
@@ -526,26 +607,47 @@
   }
 
   function volanteCota(b, cota) {
+    /** A cota é substituída quando o servidor grava um lote; as funções abaixo sempre leem a versão mais recente. */
+    function cotaAtual() { return estado.minhasCotas.filter(function (c) { return c.id === cota.id; })[0] || cota; }
     var mod = modalidadeDe(b);
     var v = estado.volante;
     var total = b.jogosPorCota;
-    var faltam = total - cota.jogos.length;
     var editavel = cota.status === 'rascunho' || cota.status === 'completa';
     var editando = editavel && !!v.editando;
+    var visiveis = jogosVisiveis(cota);
+    var faltam = total - visiveis.length;
     var mostrarVolante = editavel && (faltam > 0 || editando);
+    var salvandoTudo = editavel && !editando && faltam === 0 && cota.status !== 'completa' && !fila.erro;
     var partes = [];
 
-    partes.push(h('div', { class: 'progresso' },
-      h('div', { class: 'progresso-texto' }, h('strong', {}, cota.jogos.length + ' de ' + total), ' jogos montados',
-        h('span', { class: 'selo ' + (CLASSE_COTA[cota.status] || ''), style: 'margin-left:.6rem' }, ROTULO_COTA[cota.status] || cota.status)),
-      h('div', { class: 'barra', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': cota.jogos.length },
-        h('div', { style: 'width:' + Math.round(cota.jogos.length / total * 100) + '%' }))));
+    function blocoProgresso() {
+      var n = jogosVisiveis(cotaAtual()).length;
+      return h('div', { class: 'progresso' },
+        h('div', { class: 'progresso-texto' }, h('strong', {}, n + ' de ' + total), ' jogos montados',
+          h('span', { class: 'selo ' + (CLASSE_COTA[cota.status] || ''), style: 'margin-left:.6rem' }, ROTULO_COTA[cota.status] || cota.status)),
+        h('div', { class: 'barra', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': n },
+          h('div', { style: 'width:' + Math.round(n / total * 100) + '%' })));
+    }
+    var boxProgresso = h('div', {}, blocoProgresso());
+    var boxLista = h('div', {}, listaJogos(cotaAtual(), editavel));
+    partes.push(boxProgresso);
+
+    if (fila.erro && fila.cotaId === cota.id) {
+      partes.push(h('div', { class: 'aviso-reprovado', role: 'alert' },
+        h('strong', {}, 'Não foi possível salvar seus jogos: '), fila.erro,
+        h('div', { class: 'acoes' },
+          h('button', { class: 'primario', onclick: function () { fila.erro = ''; agendarEnvio(cota.id, true); renderPainel(); } }, 'Tentar de novo'),
+          h('button', { onclick: function () { fila.pend = []; fila.erro = ''; renderPainel(); } }, 'Descartar os não salvos'))));
+    }
 
     if (cota.status === 'confirmada') partes.push(painelConfirmada());
     else if (cota.status === 'aguardando_pagamento') partes.push(painelPix(b, cota));
     else {
       if (cota.observacao) {
         partes.push(h('div', { class: 'aviso-reprovado', role: 'alert' }, h('strong', {}, 'O administrador não aprovou o pagamento: '), cota.observacao + ' ', 'Corrija o que for preciso e gere o PIX de novo.'));
+      }
+      if (salvandoTudo) {
+        partes.push(h('div', { class: 'destaque', role: 'status' }, h('strong', {}, 'Salvando seus jogos… '), 'Em instantes a cota fica pronta para gerar o PIX.'));
       }
       if (cota.status === 'completa' && !editando) {
         partes.push(h('div', { class: 'destaque' }, h('strong', {}, 'Bolão escolhido! '),
@@ -564,22 +666,34 @@
       }
     }
 
+    var refrescar = function () {
+      boxProgresso.replaceChildren(blocoProgresso());
+      boxLista.replaceChildren(listaJogos(cotaAtual(), editavel));
+      if (tituloJogo) tituloJogo.textContent = 'Jogo ' + (jogosVisiveis(cotaAtual()).length + 1) + ' de ' + total;
+    };
+    var tituloJogo = null;
+    estado.refrescar = refrescar;
+
     if (mostrarVolante) {
       var contador = h('p', { class: 'volante-contador', 'aria-live': 'polite' });
       var btnAdd = h('button', { class: 'primario', disabled: true }, editando ? 'Salvar alteração' : 'Adicionar à cota');
       var erroBox = h('p', { class: 'erro-form', role: 'alert' });
       var botoes = {};
 
-      var atualizar = function () {
+      function pintar(num) {
+        var marcado = v.sel.indexOf(num) !== -1;
+        botoes[num].className = 'bola' + (marcado ? ' marcada' : '');
+        botoes[num].setAttribute('aria-pressed', String(marcado));
+      }
+      function atualizarContador() {
         var n = v.sel.length;
         contador.textContent = n + ' de ' + b.qtdNumeros + ' números escolhidos' + (n ? ': ' + v.sel.slice().sort(function (x, y) { return x - y; }).join(' · ') : '');
         btnAdd.disabled = n !== b.qtdNumeros;
-        Object.keys(botoes).forEach(function (k) {
-          var marcado = v.sel.indexOf(Number(k)) !== -1;
-          botoes[k].className = 'bola' + (marcado ? ' marcada' : '');
-          botoes[k].setAttribute('aria-pressed', String(marcado));
-        });
-      };
+      }
+      function atualizar() {
+        Object.keys(botoes).forEach(function (k) { pintar(Number(k)); });
+        atualizarContador();
+      }
 
       var grade = h('div', { class: 'volante', style: 'grid-template-columns: repeat(' + U.colunasVolante(mod.maximo) + ', 1fr)', role: 'group', 'aria-label': 'Números de 1 a ' + mod.maximo });
       for (var n = mod.minimo; n <= mod.maximo; n++) {
@@ -590,26 +704,60 @@
             if (i !== -1) v.sel.splice(i, 1);
             else if (v.sel.length >= b.qtdNumeros) { erroBox.textContent = 'Este jogo já tem ' + b.qtdNumeros + ' números. Desmarque um para trocar.'; return; }
             else v.sel.push(num);
-            atualizar();
-          } }, String(num < 10 ? '0' + num : num));
+            pintar(num); // só o botão tocado muda: resposta imediata
+            atualizarContador();
+          } }, U.dezena(num));
           botoes[num] = bt;
           grade.appendChild(bt);
         })(n);
       }
 
       btnAdd.addEventListener('click', function () {
-        var payload = { cotaId: cota.id, numeros: v.sel.slice().sort(function (x, y) { return x - y; }) };
-        if (v.editando) payload.jogoId = v.editando;
-        executar(async function () {
-          substituirCota(await API.chamar('jogos.salvar', payload));
-          estado.volante = { sel: [], editando: null };
-          aviso(editando ? 'Jogo atualizado.' : 'Jogo adicionado.');
-          renderPainel();
-        }, btnAdd, function (m) { erroBox.textContent = m; });
+        var numeros = v.sel.slice().sort(function (x, y) { return x - y; });
+        if (v.editando) { // edição: uma chamada direta
+          executar(async function () {
+            substituirCota(await API.chamar('jogos.salvar', { cotaId: cota.id, numeros: numeros, jogoId: v.editando }));
+            estado.volante = { sel: [], editando: null };
+            aviso('Jogo atualizado.');
+            renderPainel();
+          }, btnAdd, function (m) { erroBox.textContent = m; });
+          return;
+        }
+        var atuais = jogosVisiveis(cotaAtual());
+        var chave = numeros.join('-');
+        if (atuais.some(function (j) { return j.numeros.join('-') === chave; })) { erroBox.textContent = 'Este jogo já está na sua cota.'; return; }
+        if (atuais.length >= total) { erroBox.textContent = 'Sua cota já tem todos os ' + total + ' jogos.'; return; }
+        if (fila.cotaId !== cota.id) { fila.cotaId = cota.id; fila.pend = []; fila.erro = ''; }
+        fila.pend.push(numeros); // aparece na hora; o servidor grava em seguida, em lote
+        v.sel = [];
+        erroBox.textContent = '';
+        var completou = atuais.length + 1 === total;
+        agendarEnvio(cota.id, completou);
+        if (completou) renderPainel();
+        else { atualizar(); refrescar(); }
       });
 
+      tituloJogo = h('h3', {}, editando ? 'Editando um jogo' : 'Jogo ' + (visiveis.length + 1) + ' de ' + total);
+      var restantes = !editando && faltam >= 2 ? h('button', { type: 'button', onclick: function () {
+        if (!window.confirm('Preencher os ' + faltam + ' jogos que faltam com números aleatórios?')) return;
+        var usados = {};
+        jogosVisiveis(cotaAtual()).forEach(function (j) { usados[j.numeros.join('-')] = true; });
+        var novos = [];
+        for (var t = 0; t < 5000 && novos.length < faltam; t++) {
+          var g = U.sortearNumeros(mod.maximo, b.qtdNumeros, aleatorio);
+          var k = g.join('-');
+          if (!usados[k]) { usados[k] = true; novos.push(g); }
+        }
+        if (novos.length < faltam) { erroBox.textContent = 'Não foi possível sortear jogos diferentes.'; return; }
+        if (fila.cotaId !== cota.id) { fila.cotaId = cota.id; fila.pend = []; fila.erro = ''; }
+        fila.pend = fila.pend.concat(novos);
+        estado.volante = { sel: [], editando: null };
+        agendarEnvio(cota.id, true);
+        renderPainel();
+      } }, 'Completar os ' + faltam + ' restantes com surpresinha') : null;
+
       partes.push(h('section', { class: 'cartao' },
-        h('h3', {}, editando ? 'Editando um jogo' : 'Jogo ' + (cota.jogos.length + 1) + ' de ' + total),
+        tituloJogo,
         h('p', { class: 'sub' }, 'Escolha ' + b.qtdNumeros + ' números entre ' + mod.minimo + ' e ' + mod.maximo + '.'),
         contador, grade, erroBox,
         h('div', { class: 'acoes' },
@@ -620,16 +768,21 @@
           } }, 'Surpresinha'),
           h('button', { type: 'button', onclick: function () { v.sel = []; erroBox.textContent = ''; atualizar(); } }, 'Limpar'),
           editando ? h('button', { type: 'button', onclick: function () { estado.volante = { sel: [], editando: null }; renderPainel(); } }, 'Cancelar edição') : null,
-          btnAdd)));
+          btnAdd),
+        restantes ? h('div', { class: 'acoes' }, restantes) : null));
       atualizar();
+    } else {
+      tituloJogo = null;
     }
 
-    partes.push(listaJogos(cota, editavel));
+    partes.push(boxLista);
 
     if (editavel) {
       partes.push(h('div', { class: 'acoes rodape-cota' }, h('button', { class: 'perigo', onclick: function (ev) {
         if (!window.confirm('Desistir desta cota? Os jogos montados serão apagados e a vaga será liberada.')) return;
         executar(async function () {
+          await esperarFila();
+          fila.pend = []; fila.erro = '';
           await API.chamar('cotas.cancelar', { cotaId: cota.id });
           estado.minhasCotas = estado.minhasCotas.filter(function (c) { return c.id !== cota.id; });
           estado.abertos = await API.chamar('boloes.abertos', {});

@@ -78,7 +78,30 @@
     return pool.slice(0, qtd).sort(function (a, b) { return a - b; });
   }
 
+  /** A, B, ... Z, AA, AB... (letra do jogo no comprovante). */
+  function letraJogo(i) {
+    var L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    return i < 26 ? L.charAt(i) : L.charAt(Math.floor(i / 26) - 1) + L.charAt(i % 26);
+  }
+
+  /** dd/mm/aaaa hh:mm:ss no horário local. */
+  function dataHora(ms) {
+    var d = new Date(ms);
+    return dois(d.getDate()) + '/' + dois(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dois(d.getHours()) + ':' + dois(d.getMinutes()) + ':' + dois(d.getSeconds());
+  }
+
+  function dataCurta(ms) {
+    var d = new Date(ms);
+    return dois(d.getDate()) + '/' + dois(d.getMonth() + 1) + '/' + d.getFullYear();
+  }
+
+  function dezena(n) { return n < 10 ? '0' + n : String(n); }
+
   var api = {
+    letraJogo: letraJogo,
+    dataHora: dataHora,
+    dataCurta: dataCurta,
+    dezena: dezena,
     formatarRestante: formatarRestante,
     colunasVolante: colunasVolante,
     sortearNumeros: sortearNumeros,

@@ -13,7 +13,8 @@ async function subir() {
   env.ctx.primeiroAdmin();
   const codigoAdmin = env.logs.find((l) => l.includes('CÓDIGO DO PRIMEIRO')).match(/: ([0-9A-F-]{23})$/)[1];
 
-  const pedidos = { options: 0, posts: 0 };
+  const pedidos = { options: 0, posts: 0, porAcao: {} };
+  let atrasoMs = 0; // simula a lentidão do Apps Script
   const api = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') { pedidos.options++; res.writeHead(404); return res.end(); } // sem preflight no Apps Script
     if (req.method !== 'POST') { res.writeHead(404); return res.end(); }
@@ -21,9 +22,12 @@ async function subir() {
     req.on('data', (d) => (corpo += d));
     req.on('end', () => {
       pedidos.posts++;
+      try { const a = JSON.parse(corpo).acao; pedidos.porAcao[a] = (pedidos.porAcao[a] || 0) + 1; } catch (e) { /* ignora */ }
       const saida = env.ctx.doPost({ postData: { contents: corpo } }).getContent();
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(saida);
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(saida);
+      }, atrasoMs);
     });
   });
 
@@ -39,7 +43,7 @@ async function subir() {
   await new Promise((r) => api.listen(0, '127.0.0.1', r));
   await new Promise((r) => estatico.listen(0, '127.0.0.1', r));
   return {
-    env, codigoAdmin, pedidos,
+    env, codigoAdmin, pedidos, definirAtraso: (ms) => { atrasoMs = ms; },
     urlSite: 'http://127.0.0.1:' + estatico.address().port,
     urlApi: 'http://127.0.0.1:' + api.address().port + '/exec',
     fechar: () => { api.close(); estatico.close(); }

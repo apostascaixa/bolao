@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 const partes = [
-  'shared/regras.js', 'shared/rateio.js', 'shared/pix.js',
+  'shared/regras.js', 'shared/rateio.js', 'shared/pix.js', 'shared/conferencia.js',
   ...fs.readdirSync(path.join(raiz, 'backend/src')).sort().map((f) => 'backend/src/' + f)
 ];
 let saida = '// ARQUIVO GERADO por scripts/build-backend.js. Não edite aqui: edite shared/ ou backend/src/ e gere de novo.\n';

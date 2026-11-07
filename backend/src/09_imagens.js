@@ -56,6 +56,7 @@ function idsImagensPermitidas() {
   var c = lerConfig();
   var ids = [c['topo.imagemId'], c['pix.qrImagemId']];
   lerTabela('Banners').forEach(function (b) { ids.push(b.imagemId); });
+  lerTabela('Auditoria').forEach(function (e) { ids.push(e.imagemId); });
   return ids.filter(function (x) { return !!x; });
 }
 
@@ -65,6 +66,7 @@ function obterImagem(d) {
   if (typeof d.id !== 'string' || d.id.length > 60) throw naoAchou;
   if (idsImagensPermitidas().indexOf(d.id) === -1) throw naoAchou;
   if (lerConfig()['pix.qrImagemId'] === d.id) autenticar(d.token);
+  if (lerTabela('Auditoria').some(function (e) { return e.imagemId === d.id; })) exigirAdmin(d.token); // comprovantes: só administrador
   var url = lerImagemDataUrl(d.id);
   if (!url) throw naoAchou;
   return { dataUrl: url };

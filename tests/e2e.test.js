@@ -39,7 +39,7 @@ test('fluxo completo: admin, config, carrossel, volante, PIX, aprovação e pág
   const completarCota = async () => {
     await page.getByRole('heading', { name: /^Jogo \d+ de 10$/ }).waitFor(); // espera o volante aparecer
     for (let i = 0; i < 25 && (await page.getByRole('heading', { name: /^Jogo \d+ de 10$/ }).count()) > 0; i++) {
-      await page.getByRole('button', { name: 'Surpresinha' }).click();
+      await page.getByRole('button', { name: 'Surpresinha', exact: true }).click();
       await page.getByRole('button', { name: 'Adicionar à cota' }).click();
       await page.waitForTimeout(80);
     }
@@ -139,6 +139,7 @@ test('fluxo completo: admin, config, carrossel, volante, PIX, aprovação e pág
   await page.getByRole('button', { name: 'Sair' }).click();
   await page.getByRole('button', { name: 'Entrar', exact: true }).first().waitFor();
   await page.goto(srv.urlSite + '/?convite=' + codigo);
+  assert.equal(await page.getByRole('link', { name: 'Ver a página pública dos jogos' }).getAttribute('href'), 'publico.html');
   await page.getByLabel('Seu nome').fill('Maria Silva');
   await page.getByLabel('Usuário').fill('maria');
   await page.getByLabel('Senha', { exact: true }).fill('senha-maria-1');
@@ -172,7 +173,7 @@ test('fluxo completo: admin, config, carrossel, volante, PIX, aprovação e pág
   await page.getByRole('button', { name: 'Adicionar à cota' }).click();
   await page.getByText('Este jogo já está na sua cota.').waitFor();
   await page.getByRole('button', { name: 'Limpar' }).click();
-  await page.getByRole('button', { name: 'Surpresinha' }).click();
+  await page.getByRole('button', { name: 'Surpresinha', exact: true }).click();
   await page.getByRole('button', { name: 'Adicionar à cota' }).click();
   await progresso('2 de 10').waitFor();
   await page.getByRole('button', { name: 'Editar' }).first().click();
@@ -266,6 +267,57 @@ test('fluxo completo: admin, config, carrossel, volante, PIX, aprovação e pág
   await page.getByText('Nenhum pagamento aguardando aprovação.').waitFor();
   await page.getByRole('heading', { name: 'Confirmadas (1)' }).waitFor();
 
+  // 14b) auditoria: comprovante, jogos registrados (divergência e conferência), registro oficial
+  const jogosSistema = srv.env.ctx.lerTabela('Jogos').map((j) => j.numeros.split('-').map(Number));
+  assert.equal(jogosSistema.length, 10);
+  const linhaJogo = (j, i) => String.fromCharCode(65 + i) + ' ' + j.map((n) => String(n).padStart(2, '0')).join(' ') + ' SU';
+  const textoOk = jogosSistema.map(linhaJogo).join('\n');
+  const textoDiverge = [...jogosSistema.slice(0, 9), [60, 59, 58, 57, 56, 55]].map(linhaJogo).join('\n') + '\nCOTA 1/25';
+  await page.getByRole('tab', { name: 'Auditoria' }).click();
+  await page.getByRole('heading', { name: 'Auditoria do registro oficial' }).waitFor();
+  assert.ok(await page.getByText('Ainda não registrado').isVisible());
+  await page.getByLabel('Enviar comprovante (foto ou print)').setInputFiles(arquivoPng('recibo.png', 120, 90));
+  await page.getByRole('button', { name: 'Abrir comprovante 1' }).waitFor();
+  await page.getByRole('button', { name: 'Abrir comprovante 1' }).click();
+  await page.locator('.visualizador .visualizador-img.carregada').waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('.visualizador').waitFor({ state: 'detached' });
+  await page.locator('textarea[name=jogosRegistrados]').fill(textoDiverge);
+  await page.getByRole('button', { name: 'Salvar e comparar com os jogos dos participantes' }).click();
+  await page.getByText('Divergência encontrada.').waitFor();
+  assert.ok(await page.getByText('Estão no sistema e faltam no registro (1)').isVisible());
+  assert.ok(await page.getByText('Estão no registro e não são de nenhum participante (1)').isVisible());
+  await page.locator('textarea[name=jogosRegistrados]').fill(textoOk);
+  await page.getByRole('button', { name: 'Salvar e comparar com os jogos dos participantes' }).click();
+  await page.getByText('Confere: os jogos registrados são exatamente os dos participantes.').waitFor();
+  await page.getByLabel('Número do concurso').fill('3100');
+  await page.getByRole('button', { name: 'Marcar como registrado oficialmente' }).click();
+  await page.getByText('Bolão marcado como registrado.').waitFor();
+  assert.ok(await page.getByText('Concurso 3100').first().isVisible());
+  await page.screenshot({ path: '/tmp/e2e-auditoria.png', fullPage: true });
+
+  // 14c) conferência: resultado com 4 dezenas de um jogo = pelo menos uma quadra
+  const g0 = jogosSistema[0];
+  const extras = Array.from({ length: 60 }, (_, i) => i + 1).filter((n) => !g0.includes(n)).slice(0, 2);
+  await page.getByRole('tab', { name: 'Conferência' }).click();
+  await page.getByRole('heading', { name: 'Conferência de resultado' }).waitFor();
+  await page.getByLabel('Número do concurso').fill('3100');
+  await page.getByLabel('Resultado oficial (dezenas sorteadas)').fill('1 2 3');
+  await page.getByText('3 de 6 dezenas').waitFor();
+  await page.getByRole('button', { name: 'Pesquisar nos bolões registrados' }).click();
+  await page.getByText('O resultado de Mega-Sena tem 6 dezenas.').waitFor();
+  await page.getByLabel('Resultado oficial (dezenas sorteadas)').fill([...g0.slice(0, 4), ...extras].join(' '));
+  await page.getByRole('button', { name: 'Pesquisar nos bolões registrados' }).click();
+  await page.getByText(/jogo\(s\) premiado\(s\)!/).waitFor();
+  assert.ok(await page.getByText('Maria Silva · jogo A').isVisible());
+  assert.ok((await page.locator('.chip.acerto').count()) >= 4);
+  assert.ok(await page.getByText(/Quadra/).first().isVisible());
+  await page.getByText(/concurso 3100 ·/).waitFor(); // histórico
+  await page.screenshot({ path: '/tmp/e2e-conferencia.png', fullPage: true });
+  await page.getByLabel('Resultado oficial (dezenas sorteadas)').fill('50 51 52 53 54 55');
+  await page.getByRole('button', { name: 'Pesquisar nos bolões registrados' }).click();
+  await page.getByText('Nenhum jogo premiado nos bolões registrados.').waitFor();
+
   // 15) participante vê a confirmação
   await page.getByRole('button', { name: 'Sair' }).click();
   await entrar(page, 'maria', 'senha-maria-1');
@@ -279,7 +331,17 @@ test('fluxo completo: admin, config, carrossel, volante, PIX, aprovação e pág
   await pub.goto(srv.urlSite + '/publico.html');
   await pub.getByText('Maria S.').waitFor();
   await pub.locator('.topo-site .topo-img.carregada').waitFor();
-  assert.equal(await pub.locator('.jogos li').count(), 10);
+  assert.equal(await pub.locator('.recibo').count(), 1);
+  assert.equal(await pub.locator('.recibo-jogo').count(), 10);
+  assert.equal(await pub.locator('.recibo-letra').first().innerText(), 'A');
+  assert.equal(await pub.locator('.recibo-letra').last().innerText(), 'J');
+  const textoRecibo = await pub.locator('.recibo').innerText();
+  assert.match(textoRecibo, /COTA 1\/25/);
+  assert.match(textoRecibo, /CONCURSO\s*3100/);
+  assert.match(textoRecibo, /REGISTRADO OFICIALMENTE EM/);
+  assert.match(textoRecibo, /Não substitui o recibo oficial/);
+  assert.match(await pub.locator('.recibo-nums').first().innerText(), /^\d{2}(\s+\d{2}){5}$/);
+  assert.equal(await pub.getByRole('link', { name: 'Entrar no sistema' }).getAttribute('href'), 'index.html');
   assert.equal(await pub.getByText('Cotas confirmadas').count(), 1);
   const textoPublico = await pub.locator('body').innerText();
   for (const proibido of ['Maria Silva', '@maria', 'maria"', 'bolao@exemplo.com', 'senha']) assert.ok(!textoPublico.includes(proibido), proibido);
@@ -327,4 +389,95 @@ test('servidor fora do ar mostra mensagem de conexão e não apaga o login', asy
   await page.goto(srv.urlSite);
   await page.getByText('Sem conexão').first().waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('bolao.token')), 'x'.repeat(64));
+});
+
+test('escolha dos jogos é imediata mesmo com servidor lento; salva em lote e se recupera de falha', async (t) => {
+  const srv = await subir();
+  const env = srv.env;
+  // preparação direta no backend (rápida): admin, bolão aberto e uma participante
+  const adm = env.chamar('cadastrar', { codigoConvite: srv.codigoAdmin, usuario: 'admin', nome: 'Admin', senha: 'senha-forte-1' }).dados.token;
+  const bolao = env.chamar('admin.boloes.criar', { token: adm, nome: 'Mega', modalidade: 'mega-sena', qtdNumeros: 6, valorCotaCentavos: 6000, jogosPorCota: 10, limiteCotas: 20, prazo: Date.now() + 7 * 864e5 }).dados;
+  env.chamar('admin.boloes.status', { token: adm, id: bolao.id, status: 'aberto' });
+  const conv = env.chamar('admin.convites.criar', { token: adm }).dados.codigo;
+  env.chamar('cadastrar', { codigoConvite: conv, usuario: 'maria', nome: 'Maria Silva', senha: 'senha-maria-1' });
+
+  const browser = await chromium.launch();
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e)));
+  await page.addInitScript((u) => { window.BOLAO_CONFIG = { API_URL: u }; }, srv.urlApi);
+  t.after(async () => { await browser.close(); srv.fechar(); });
+
+  await page.goto(srv.urlSite);
+  await entrar(page, 'maria', 'senha-maria-1');
+  await page.locator('.carrossel').waitFor();
+  srv.definirAtraso(900); // a partir daqui cada chamada ao servidor leva 0,9 s
+  await page.getByRole('button', { name: 'Iniciar minha cota' }).click();
+  await page.getByRole('heading', { name: 'Jogo 1 de 10' }).waitFor();
+
+  const num = (n) => page.getByRole('button', { name: 'Número ' + n, exact: true });
+  const adicionar = async (nums, proximo) => {
+    for (const n of nums) await num(n).click();
+    const t0 = Date.now();
+    await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+    await page.getByRole('heading', { name: 'Jogo ' + proximo + ' de 10' }).waitFor();
+    return Date.now() - t0;
+  };
+  const tempos = [];
+  tempos.push(await adicionar([1, 2, 3, 4, 5, 6], 2));
+  tempos.push(await adicionar([7, 8, 9, 10, 11, 12], 3));
+  tempos.push(await adicionar([13, 14, 15, 16, 17, 18], 4));
+  for (const ms of tempos) assert.ok(ms < 600, 'o próximo jogo deve aparecer sem esperar o servidor (0,9 s): ' + ms + ' ms');
+  assert.equal(await page.locator('.progresso-texto strong').innerText(), '3 de 10');
+  assert.ok((await page.locator('.jogos li.pendente').count()) >= 1, 'jogos ainda não gravados aparecem como "salvando…"');
+  assert.equal(srv.env.ctx.lerTabela('Jogos').length, 0, 'o servidor ainda não gravou nada (lento)');
+
+  // grava tudo em lote, em segundo plano
+  await page.locator('.salvando').first().waitFor({ state: 'detached', timeout: 15000 });
+  assert.equal(srv.env.ctx.lerTabela('Jogos').length, 3);
+  assert.ok((srv.pedidos.porAcao['jogos.salvarVarios'] || 0) <= 2, 'poucas chamadas em lote: ' + srv.pedidos.porAcao['jogos.salvarVarios']);
+  assert.equal(srv.pedidos.porAcao['jogos.salvar'], undefined, 'nenhuma chamada jogo a jogo');
+  assert.equal(await page.locator('.jogos li').count(), 3);
+
+  // duplicado é barrado na hora, sem ir ao servidor
+  const antes = srv.pedidos.posts;
+  for (const n of [6, 5, 4, 3, 2, 1]) await num(n).click();
+  await page.getByRole('button', { name: 'Adicionar à cota' }).click();
+  await page.getByText('Este jogo já está na sua cota.').waitFor();
+  assert.equal(srv.pedidos.posts, antes);
+  await page.getByRole('button', { name: 'Limpar' }).click();
+
+  // falha do servidor: aviso, jogo preservado e "Tentar de novo"
+  let falhar = true;
+  await page.route(srv.urlApi, (route) => {
+    if (falhar && (route.request().postData() || '').includes('jogos.salvarVarios')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ok: false, erro: 'Falha simulada do servidor' }) });
+    }
+    return route.continue();
+  });
+  await adicionar([20, 21, 22, 23, 24, 25], 5);
+  await page.getByText('Não foi possível salvar seus jogos:').waitFor();
+  assert.ok(await page.getByText('Falha simulada do servidor').isVisible());
+  assert.equal(srv.env.ctx.lerTabela('Jogos').length, 3, 'nada foi gravado na falha');
+  assert.ok((await page.locator('.jogos li.pendente').count()) >= 1, 'o jogo digitado continua na tela');
+  falhar = false;
+  await page.getByRole('button', { name: 'Tentar de novo' }).click();
+  await page.locator('.salvando').first().waitFor({ state: 'detached', timeout: 15000 });
+  assert.equal(srv.env.ctx.lerTabela('Jogos').length, 4);
+  assert.equal(await page.getByText('Não foi possível salvar seus jogos:').count(), 0);
+
+  // completar o resto com surpresinha: uma única chamada em lote
+  const lotesAntes = srv.pedidos.porAcao['jogos.salvarVarios'];
+  page.once('dialog', (d) => d.accept());
+  const t1 = Date.now();
+  await page.getByRole('button', { name: 'Completar os 6 restantes com surpresinha' }).click();
+  await page.locator('.progresso-texto strong').filter({ hasText: '10 de 10' }).waitFor();
+  assert.ok(Date.now() - t1 < 700, 'os 6 jogos aparecem na hora: ' + (Date.now() - t1) + ' ms');
+  await page.getByText('Salvando seus jogos…').waitFor();
+  await page.getByText('Bolão escolhido!').waitFor({ timeout: 15000 });
+  assert.equal(srv.pedidos.porAcao['jogos.salvarVarios'], lotesAntes + 1);
+  assert.equal(srv.env.ctx.lerTabela('Jogos').length, 10);
+  assert.equal(srv.env.ctx.lerTabela('Cotas')[0].status, 'completa');
+  assert.equal(new Set(srv.env.ctx.lerTabela('Jogos').map((j) => j.numeros)).size, 10, 'sem jogos repetidos');
+  assert.deepEqual(erros, []);
 });

@@ -19,6 +19,7 @@ function bolaoParaSaida(b, ocupadas) {
     id: b.id, nome: b.nome, modalidade: b.modalidade, modalidadeNome: mod ? mod.nome : b.modalidade,
     qtdNumeros: b.qtdNumeros, valorCotaCentavos: b.valorCotaCentavos, jogosPorCota: b.jogosPorCota,
     limiteCotas: b.limiteCotas, maxCotasPorPessoa: b.maxCotasPorPessoa, prazo: b.prazo, status: b.status,
+    concurso: b.concurso || 0, registradoEm: b.registradoEm || 0,
     cotasOcupadas: ocupadas, vagas: Math.max(0, b.limiteCotas - ocupadas)
   };
 }
@@ -156,6 +157,6 @@ function boloesAbertos() {
 function modalidadesDisponiveis() {
   return Object.keys(Regras.MODALIDADES).map(function (id) {
     var m = Regras.MODALIDADES[id];
-    return { id: id, nome: m.nome, minimo: m.minimo, maximo: m.maximo, dezenasMin: m.dezenasMin, dezenasMax: m.dezenasMax };
+    return { id: id, nome: m.nome, minimo: m.minimo, maximo: m.maximo, dezenasMin: m.dezenasMin, dezenasMax: m.dezenasMax, sorteados: m.sorteados };
   });
 }

@@ -97,6 +97,38 @@ function salvarJogo(u, d) {
   });
 }
 
+/** Vários jogos de uma vez (uma leitura, um bloco de escrita): tudo ou nada. */
+function salvarJogosLote(u, d) {
+  return comLock(function () {
+    var agora = RELOGIO.agora();
+    var c = minhaCotaOuErro(u, d.cotaId, agora);
+    var b = achaBolao(c.bolaoId);
+    exigirEditavel(c, b, agora);
+    if (!Array.isArray(d.jogos) || d.jogos.length === 0) throw erroNegocio('Nenhum jogo para salvar.');
+    var jogos = lerTabela('Jogos').filter(function (j) { return j.cotaId === c.id; });
+    if (jogos.length + d.jogos.length > b.jogosPorCota) {
+      throw erroNegocio('A cota aceita no máximo ' + b.jogosPorCota + ' jogos (já tem ' + jogos.length + ').');
+    }
+    var chaves = {};
+    jogos.forEach(function (j) { chaves[Regras.chaveJogo(textoParaNumeros(j.numeros))] = true; });
+    var novos = [];
+    d.jogos.forEach(function (numeros, i) {
+      var v = Regras.validarJogo(numeros, b);
+      if (!v.ok) throw erroNegocio('Jogo ' + (jogos.length + i + 1) + ': ' + v.erros.join(' '));
+      var chave = Regras.chaveJogo(v.numeros);
+      if (chaves[chave]) throw erroNegocio('Jogo ' + (jogos.length + i + 1) + ' repetido na sua cota.');
+      chaves[chave] = true;
+      novos.push({ id: novoId(), cotaId: c.id, numeros: chave, criadoEm: agora });
+    });
+    var sh = aba('Jogos');
+    var linhas = novos.map(function (j) { return linhaDe('Jogos', j); });
+    sh.getRange(sh.getLastRow() + 1, 1, linhas.length, linhas[0].length).setValues(linhas);
+    var todos = jogos.concat(novos);
+    reavaliarStatus(c, b, todos.length, agora);
+    return cotaParaSaida(c, todos);
+  });
+}
+
 function removerJogo(u, d) {
   return comLock(function () {
     var agora = RELOGIO.agora();

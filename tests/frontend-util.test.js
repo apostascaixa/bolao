@@ -72,3 +72,15 @@ test('sorteio de números: distintos, no intervalo, ordenados e completos', () =
   for (let k = 0; k < 2000; k++) U.sortearNumeros(60, 6, rng).forEach((n) => vistos.add(n));
   assert.equal(vistos.size, 60);
 });
+
+test('letra do jogo, data e dezena', () => {
+  assert.equal(U.letraJogo(0), 'A');
+  assert.equal(U.letraJogo(25), 'Z');
+  assert.equal(U.letraJogo(26), 'AA');
+  assert.equal(U.letraJogo(51), 'AZ');
+  assert.equal(U.dezena(7), '07');
+  assert.equal(U.dezena(42), '42');
+  const ms = new Date(2026, 11, 3, 9, 5, 7).getTime();
+  assert.equal(U.dataHora(ms), '03/12/2026 09:05:07');
+  assert.equal(U.dataCurta(ms), '03/12/2026');
+});

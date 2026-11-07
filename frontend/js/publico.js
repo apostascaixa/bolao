@@ -25,13 +25,32 @@
         h('div', {}, h('small', {}, 'Cotas confirmadas'), h('strong', {}, b.confirmadas + ' de ' + b.limiteCotas))));
   }
 
-  function participante(p) {
-    return h('article', { class: 'cartao' },
-      h('div', { class: 'cartao-topo' }, h('h3', {}, p.nome), h('span', { class: 'selo aberto' }, 'Confirmada')),
-      h('ol', { class: 'jogos' }, p.jogos.map(function (j, i) {
-        return h('li', {}, h('span', { class: 'jogo-n' }, 'Jogo ' + (i + 1)),
-          h('span', { class: 'chips' }, j.map(function (n) { return h('span', { class: 'chip' }, n < 10 ? '0' + n : String(n)); })));
-      })));
+  function linha(rotulo, valor) {
+    return h('div', { class: 'recibo-linha' }, h('span', {}, rotulo), h('span', {}, valor));
+  }
+
+  /** Comprovante interno do grupo, no formato de recibo: um jogo por linha, com letra. */
+  function recibo(b, p) {
+    var registrado = b.registradoEm > 0;
+    return h('article', { class: 'recibo tema-' + b.modalidade, 'aria-label': 'Comprovante de ' + p.nome },
+      h('div', { class: 'recibo-titulo' }, b.modalidadeNome.toUpperCase()),
+      h('div', { class: 'recibo-sub' }, b.nome.toUpperCase()),
+      h('hr'),
+      linha('COTA ' + p.cotaNumero + '/' + b.limiteCotas, p.codigo),
+      linha('CONFIRMADA', p.confirmadaEm ? U.dataHora(p.confirmadaEm) : '-'),
+      linha('CONCURSO', b.concurso ? String(b.concurso) : 'A DEFINIR'),
+      h('hr'),
+      p.jogos.map(function (j, i) {
+        return h('div', { class: 'recibo-jogo' }, h('span', { class: 'recibo-letra' }, U.letraJogo(i)),
+          h('span', { class: 'recibo-nums' }, j.map(U.dezena).join('  ')));
+      }),
+      h('hr'),
+      linha('VALOR DA COTA', U.centavosParaReais(b.valorCotaCentavos)),
+      linha('PARTICIPANTE', p.nome.toUpperCase()),
+      h('hr'),
+      h('div', { class: 'recibo-registro ' + (registrado ? 'ok' : 'pendente') },
+        registrado ? '✔ REGISTRADO OFICIALMENTE EM ' + U.dataCurta(b.registradoEm) : 'AGUARDANDO REGISTRO OFICIAL'),
+      h('div', { class: 'recibo-aviso' }, 'Comprovante interno do grupo. Não substitui o recibo oficial da lotérica.'));
   }
 
   function render() {
@@ -40,7 +59,7 @@
     var banners = estado.pub ? estado.pub.banners : [];
     montar(
       h('header', { class: 'topo' }, h('strong', {}, 'Bolão da Sorte · Jogos confirmados'),
-        h('a', { class: 'link-topo', href: 'index.html' }, 'Entrar no sistema')),
+        h('a', { class: 'botao-link claro', href: 'index.html' }, 'Entrar no sistema')),
       h('main', { class: 'painel' },
         banners.length ? Car.criar({ slides: banners.map(function (bn) { return { el: Car.slideBanner(bn), rotulo: bn.titulo || 'banner' }; }), segundos: estado.pub.carrossel.segundos }) : null,
         estado.boloes.length > 1 ? h('div', { class: 'abas', role: 'tablist' }, estado.boloes.map(function (x) {
@@ -49,7 +68,7 @@
         })) : null,
         b ? [cartaoBolao(b),
           h('div', { class: 'acoes' }, h('button', { onclick: carregar }, 'Atualizar')),
-          b.participantes.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum participante confirmado ainda.') : b.participantes.map(participante)]
+          b.participantes.length === 0 ? h('p', { class: 'vazio' }, 'Nenhum participante confirmado ainda.') : h('div', { class: 'recibos' }, b.participantes.map(function (p) { return recibo(b, p); }))]
           : h('p', { class: 'vazio' }, 'Ainda não há jogos publicados.'),
         h('p', { class: 'aviso-legal' }, 'Este sistema organiza o grupo. Não é um canal oficial de apostas da CAIXA.')));
   }

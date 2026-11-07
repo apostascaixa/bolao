@@ -3,22 +3,25 @@ var G = (typeof globalThis !== 'undefined') ? globalThis : this;
 var Regras = G.BolaoRegras;
 var Rateio = G.BolaoRateio;
 var Pix = G.BolaoPix;
+var Conf = G.BolaoConferencia;
 
 var CFG = {
   ABAS: {
     Usuarios: ['id', 'usuario', 'nome', 'hashSenha', 'papel', 'status', 'tentativas', 'bloqueadoAte', 'criadoEm', 'conviteId'],
     Convites: ['id', 'codigoHash', 'papel', 'criadoPor', 'criadoEm', 'expiraEm', 'status', 'usadoPor', 'usadoEm'],
     Sessoes: ['tokenHash', 'userId', 'criadoEm', 'expiraEm'],
-    Boloes: ['id', 'nome', 'modalidade', 'qtdNumeros', 'valorCotaCentavos', 'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'status', 'criadoPor', 'criadoEm', 'atualizadoEm'],
+    Boloes: ['id', 'nome', 'modalidade', 'qtdNumeros', 'valorCotaCentavos', 'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'status', 'criadoPor', 'criadoEm', 'atualizadoEm', 'concurso', 'registradoEm'],
     Cotas: ['id', 'bolaoId', 'userId', 'status', 'criadoEm', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm', 'observacao'],
     Jogos: ['id', 'cotaId', 'numeros', 'criadoEm'],
     Config: ['chave', 'valor'],
     Banners: ['id', 'imagemId', 'titulo', 'link', 'ativo', 'ordem', 'criadoEm'],
-    Imagens: ['id', 'parte', 'tipo', 'dados', 'criadoEm']
+    Imagens: ['id', 'parte', 'tipo', 'dados', 'criadoEm'],
+    Auditoria: ['id', 'bolaoId', 'tipo', 'imagemId', 'texto', 'criadoEm'],
+    Conferencias: ['id', 'modalidade', 'concurso', 'resultado', 'premiados', 'criadoEm']
   },
   COLUNAS_NUM: ['tentativas', 'bloqueadoAte', 'criadoEm', 'expiraEm', 'usadoEm', 'qtdNumeros', 'valorCotaCentavos',
     'jogosPorCota', 'limiteCotas', 'maxCotasPorPessoa', 'prazo', 'atualizadoEm', 'confirmadaEm', 'pixGeradoEm',
-    'parte', 'ordem', 'ativo'],
+    'parte', 'ordem', 'ativo', 'concurso', 'registradoEm', 'premiados'],
   SESSAO_MS: 7 * 24 * 3600 * 1000,
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,

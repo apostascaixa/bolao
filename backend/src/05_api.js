@@ -9,6 +9,7 @@ var ACOES = {
   'publico.config':        { nivel: 'publico', fn: function () { return configPublica(); } },
   'publico.jogos':         { nivel: 'publico', fn: function () { return paginaPublica(); } },
   'imagem.obter':          { nivel: 'publico', fn: function (d) { return obterImagem(d); } },
+  'jogos.salvarVarios':    { nivel: 'usuario', fn: function (d, u) { return salvarJogosLote(u, d); } },
   'cotas.gerarPix':        { nivel: 'usuario', fn: function (d, u) { return gerarPixCota(u, d); } },
   'cotas.pix':             { nivel: 'usuario', fn: function (d, u) { return pixDaMinhaCota(u, d); } },
   'cotas.minhas':          { nivel: 'usuario', fn: function (d, u) { return minhasCotas(u); } },
@@ -19,6 +20,14 @@ var ACOES = {
   'admin.cotas.listar':    { nivel: 'admin',   fn: function (d) { return listarCotasAdmin(d); } },
   'admin.cotas.aprovar':   { nivel: 'admin',   fn: function (d) { return aprovarCota(d); } },
   'admin.cotas.reprovar':  { nivel: 'admin',   fn: function (d) { return reprovarCota(d); } },
+  'admin.auditoria.resumo':   { nivel: 'admin', fn: function () { return resumoAuditoria(); } },
+  'admin.auditoria.comprovante': { nivel: 'admin', fn: function (d) { return enviarComprovante(d); } },
+  'admin.auditoria.removerEntrada': { nivel: 'admin', fn: function (d) { return removerEntradaAuditoria(d); } },
+  'admin.auditoria.jogos':    { nivel: 'admin', fn: function (d) { return salvarJogosRegistrados(d); } },
+  'admin.auditoria.registrar': { nivel: 'admin', fn: function (d) { return registrarBolao(d); } },
+  'admin.auditoria.desregistrar': { nivel: 'admin', fn: function (d) { return desregistrarBolao(d); } },
+  'admin.conferencia.consultar': { nivel: 'admin', fn: function (d) { return consultarConferencia(d); } },
+  'admin.conferencia.historico': { nivel: 'admin', fn: function () { return historicoConferencias(); } },
   'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
   'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
   'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
@@ -66,7 +75,7 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
-var VERSAO_API = '5';
+var VERSAO_API = '6';
 
 /** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {
