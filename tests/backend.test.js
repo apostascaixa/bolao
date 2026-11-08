@@ -71,7 +71,7 @@ test('hash de senha: salt diferente, verifica certo e errado, formato versionado
 test('iterações padrão são usadas quando não há propriedade', () => {
   const env = preparar();
   delete env.propriedades.HASH_ITER;
-  assert.equal(env.ctx.iteracoesHash(), 3000);
+  assert.equal(env.ctx.iteracoesHash(), 1500);
 });
 
 // ---------- cadastro ----------
@@ -623,7 +623,7 @@ test('nenhuma operação de cota deixa o lock preso', () => {
 test('doGet informa a versão publicada e conhece as ações da etapa 4', () => {
   const env = preparar();
   const r = JSON.parse(env.ctx.doGet().getContent());
-  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '6' });
+  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '8' });
   for (const a of ['cotas.minhas', 'cotas.criar', 'cotas.cancelar', 'jogos.salvar', 'jogos.remover']) {
     assert.ok(Object.prototype.hasOwnProperty.call(env.ctx.ACOES, a), a);
   }
@@ -1192,4 +1192,120 @@ test('letras dos jogos: A..Z, depois AA, AB…', () => {
   assert.equal(env.ctx.letraJogo(25), 'Z');
   assert.equal(env.ctx.letraJogo(26), 'AA');
   assert.equal(env.ctx.letraJogo(27), 'AB');
+});
+
+// ---------- limpeza de dados de teste ----------
+test('limpeza: prévia conta o que existe, sem apagar nada', () => {
+  const { env, token } = cenarioAuditoria();
+  const p = env.chamar('admin.limpeza.previa', { token }).dados;
+  assert.equal(p.boloes, 1);
+  assert.equal(p.cotas, 2);
+  assert.equal(p.confirmadas, 2);
+  assert.equal(p.jogos, 4);
+  assert.equal(p.participantes, 2);
+  assert.equal(env.chamar('admin.limpeza.previa', { token }).dados.boloes, 1);
+});
+
+test('limpeza: exige a frase exata e ser administrador', () => {
+  const { env, token, maria } = cenarioAuditoria();
+  for (const confirmacao of [undefined, '', 'apagar tudo', 'APAGAR', 'APAGAR TUDO ', true, 1]) {
+    const r = env.chamar('admin.limpeza.executar', { token, confirmacao });
+    assert.equal(r.ok, false, String(confirmacao));
+  }
+  assert.equal(env.chamar('admin.limpeza.executar', { token: maria, confirmacao: 'APAGAR TUDO' }).ok, false);
+  assert.equal(env.chamar('admin.limpeza.executar', { confirmacao: 'APAGAR TUDO' }).ok, false);
+  assert.equal(env.chamar('admin.limpeza.previa', { token: maria }).ok, false);
+  assert.equal(env.chamar('admin.limpeza.previa', {}).ok, false);
+  assert.equal(env.chamar('admin.boloes.listar', { token }).dados.length, 1); // nada foi apagado
+});
+
+test('limpeza: apaga bolões, cotas, jogos, auditoria e conferências; mantém contas, PIX, QR e banners', () => {
+  const { env, token, id } = cenarioAuditoria();
+  env.chamar('admin.imagem.enviar', { token, uso: 'qr', dataUrl: dataUrlPng(6) });
+  env.chamar('admin.imagem.enviar', { token, uso: 'banner', titulo: 'Fica', dataUrl: dataUrlPng(7) });
+  env.chamar('admin.auditoria.comprovante', { token, bolaoId: id, dataUrl: dataUrlPng(9) });
+  env.chamar('admin.auditoria.jogos', { token, bolaoId: id, texto: TEXTO_OK });
+  env.chamar('admin.auditoria.registrar', { token, bolaoId: id, concurso: 3100 });
+  env.chamar('admin.conferencia.consultar', { token, modalidade: 'mega-sena', concurso: 3100, resultado: [1, 2, 3, 4, 5, 6] });
+  const imagensAntes = env.ss.getSheetByName('Imagens').rows.length;
+
+  const r = env.chamar('admin.limpeza.executar', { token, confirmacao: 'APAGAR TUDO' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.boloes, 1);
+  assert.equal(r.dados.cotas, 2);
+  assert.equal(r.dados.comprovantes, 1);
+  for (const aba of ['Boloes', 'Cotas', 'Jogos', 'Auditoria', 'Conferencias']) assert.equal(env.ss.getSheetByName(aba).rows.length, 1, aba); // só cabeçalho
+  assert.deepEqual(env.chamar('admin.boloes.listar', { token }).dados, []);
+  assert.deepEqual(env.chamar('publico.jogos', {}).dados, []);
+  assert.deepEqual(env.chamar('admin.cotas.listar', { token }).dados, []);
+  assert.deepEqual(env.chamar('admin.conferencia.historico', { token }).dados, []);
+
+  // mantém: contas, configuração, QR e banners; some só a imagem do comprovante
+  assert.equal(env.ss.getSheetByName('Usuarios').rows.length, 1 + 3);
+  const cfg = env.chamar('admin.config.obter', { token }).dados;
+  assert.equal(cfg.pix.chave, 'bolao@exemplo.com');
+  assert.ok(cfg.pix.qrImagemId);
+  assert.equal(cfg.banners.length, 1);
+  assert.equal(env.chamar('imagem.obter', { id: cfg.pix.qrImagemId, token }).ok, true);
+  assert.equal(env.chamar('imagem.obter', { id: cfg.banners[0].imagemId }).ok, true);
+  assert.ok(env.ss.getSheetByName('Imagens').rows.length < imagensAntes);
+  assert.equal(env.chamar('login', { usuario: 'maria', senha: 'senha-maria-1' }).ok, true);
+});
+
+test('limpeza: depois dela o sistema funciona do zero', () => {
+  const { env, token, maria } = cenarioAuditoria();
+  env.chamar('admin.limpeza.executar', { token, confirmacao: 'APAGAR TUDO' });
+  const novo = env.chamar('admin.boloes.criar', { token, ...bolaoValido() });
+  assert.equal(novo.ok, true, JSON.stringify(novo));
+  env.chamar('admin.boloes.status', { token, id: novo.dados.id, status: 'aberto' });
+  const c = env.chamar('cotas.criar', { token: maria, bolaoId: novo.dados.id });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(env.chamar('jogos.salvarVarios', { token: maria, cotaId: c.dados.id, jogos: [[1, 2, 3, 4, 5, 6]] }).ok, true);
+  assert.equal(env.estaTravado(), false);
+});
+
+test('limpeza com participantes: apaga contas que não são admin, sessões e convites usados', () => {
+  const { env, token } = cenarioAuditoria();
+  const sobra = env.chamar('admin.convites.criar', { token }).dados; // convite ainda não usado
+  assert.equal(env.chamar('admin.limpeza.previa', { token }).dados.participantes, 2);
+  const r = env.chamar('admin.limpeza.executar', { token, confirmacao: 'APAGAR TUDO', incluirParticipantes: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.dados.participantes, 2);
+  const usuarios = env.ss.getSheetByName('Usuarios').rows;
+  assert.equal(usuarios.length, 2); // cabeçalho + o administrador
+  assert.equal(env.chamar('login', { usuario: 'maria', senha: 'senha-maria-1' }).ok, false);
+  assert.equal(env.chamar('eu', { token }).ok, true); // o admin continua logado
+  const convites = env.chamar('admin.convites.listar', { token }).dados;
+  assert.ok(convites.some((c) => c.id === sobra.id && c.status === 'ativo')); // convite ativo permanece
+  assert.ok(!convites.some((c) => c.status === 'usado' && c.papel === 'participante'));
+  // o convite que sobrou ainda cadastra alguém
+  assert.equal(env.chamar('cadastrar', { codigoConvite: sobra.codigo, usuario: 'nova', nome: 'Nova Pessoa', senha: 'senha-nova-123' }).ok, true);
+});
+
+test('limpeza: só "true" de verdade inclui participantes', () => {
+  const { env, token } = cenarioAuditoria();
+  env.chamar('admin.limpeza.executar', { token, confirmacao: 'APAGAR TUDO', incluirParticipantes: 'true' });
+  assert.equal(env.ss.getSheetByName('Usuarios').rows.length, 1 + 3);
+});
+
+test('login atualiza o hash para a quantidade de iterações atual, só quando a senha está certa', () => {
+  const { env } = comAdmin(); // criado com 20 iterações
+  const hashDe = () => env.ctx.lerTabela('Usuarios')[0].hashSenha;
+  assert.ok(hashDe().startsWith('v1$20$'));
+  env.propriedades.HASH_ITER = '12';
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'errada-errada' }).ok, false);
+  assert.ok(hashDe().startsWith('v1$20$'), 'senha errada não mexe no hash');
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'senha-forte-1' }).ok, true);
+  assert.ok(hashDe().startsWith('v1$12$'), 'atualizado para 12 iterações');
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'senha-forte-1' }).ok, true); // continua entrando
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'outra-senha-1' }).ok, false);
+  const h = hashDe();
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'senha-forte-1' }).ok, true);
+  assert.equal(hashDe(), h, 'sem mudança de iterações, o hash não é regravado');
+});
+
+test('iteração do hash: formatos inválidos valem 0', () => {
+  const env = preparar();
+  assert.equal(env.ctx.iteracaoDoHash('v1$1500$abc$def'), 1500);
+  for (const x of ['lixo', '', 'v2$10$a$b', 'v1$x$a$b']) assert.equal(env.ctx.iteracaoDoHash(x), 0, x);
 });

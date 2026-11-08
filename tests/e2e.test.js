@@ -481,3 +481,66 @@ test('escolha dos jogos é imediata mesmo com servidor lento; salva em lote e se
   assert.equal(new Set(srv.env.ctx.lerTabela('Jogos').map((j) => j.numeros)).size, 10, 'sem jogos repetidos');
   assert.deepEqual(erros, []);
 });
+
+test('limpar dados de teste pelo painel: contagem, frase de confirmação e opção de participantes', async (t) => {
+  const srv = await subir();
+  const env = srv.env;
+  const adm = env.chamar('cadastrar', { codigoConvite: srv.codigoAdmin, usuario: 'admin', nome: 'Admin', senha: 'senha-forte-1' }).dados.token;
+  const bolao = env.chamar('admin.boloes.criar', { token: adm, nome: 'Bolão de teste', modalidade: 'mega-sena', qtdNumeros: 6, valorCotaCentavos: 6000, jogosPorCota: 2, limiteCotas: 10, prazo: Date.now() + 7 * 864e5 }).dados;
+  env.chamar('admin.boloes.status', { token: adm, id: bolao.id, status: 'aberto' });
+  const conv = env.chamar('admin.convites.criar', { token: adm }).dados.codigo;
+  const maria = env.chamar('cadastrar', { codigoConvite: conv, usuario: 'maria', nome: 'Maria Silva', senha: 'senha-maria-1' }).dados.token;
+  const cota = env.chamar('cotas.criar', { token: maria, bolaoId: bolao.id }).dados.id;
+  env.chamar('jogos.salvarVarios', { token: maria, cotaId: cota, jogos: [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]] });
+  const linhas = (aba) => srv.env.ss.getSheetByName(aba).rows.length - 1;
+
+  const browser = await chromium.launch();
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e)));
+  await page.addInitScript((u) => { window.BOLAO_CONFIG = { API_URL: u }; }, srv.urlApi);
+  t.after(async () => { await browser.close(); srv.fechar(); });
+
+  await page.goto(srv.urlSite);
+  await entrar(page, 'admin', 'senha-forte-1');
+  await page.getByRole('heading', { name: 'Bolões', exact: true }).waitFor();
+  await page.getByRole('tab', { name: 'Configurações' }).click();
+  await page.getByRole('button', { name: 'Limpar dados de teste…' }).click();
+  await page.getByText(/1 bolão\(ões\), 1 cota\(s\)/).waitFor();
+  assert.ok(await page.getByText(/2 jogo\(s\)/).isVisible());
+  await page.screenshot({ path: '/tmp/e2e-limpeza.png', fullPage: true });
+
+  // a frase tem de ser exata; cancelar na última confirmação não apaga nada
+  const apagar = page.getByRole('button', { name: 'Apagar definitivamente' });
+  assert.ok(await apagar.isDisabled());
+  await page.getByLabel('Digite APAGAR TUDO para confirmar').fill('apagar tudo');
+  assert.ok(await apagar.isDisabled());
+  await page.getByLabel('Digite APAGAR TUDO para confirmar').fill('APAGAR TUDO');
+  assert.ok(await apagar.isEnabled());
+  page.once('dialog', (d) => d.dismiss());
+  await apagar.click();
+  await page.waitForTimeout(300);
+  assert.equal(linhas('Boloes'), 1);
+
+  // confirmando: apaga os bolões e o que depende deles; as contas ficam
+  page.once('dialog', (d) => d.accept());
+  await apagar.click();
+  await page.getByText('Dados de teste apagados.').waitFor();
+  for (const aba of ['Boloes', 'Cotas', 'Jogos']) assert.equal(linhas(aba), 0, aba);
+  assert.equal(linhas('Usuarios'), 2);
+  await page.getByRole('tab', { name: 'Administrar bolões' }).click();
+  await page.getByText('Nenhum bolão criado ainda.').waitFor();
+
+  // segunda limpeza, agora incluindo os participantes
+  await page.getByRole('tab', { name: 'Configurações' }).click();
+  await page.getByRole('button', { name: 'Limpar dados de teste…' }).click();
+  await page.getByLabel(/Apagar também as 1 conta\(s\) de participantes/).check();
+  await page.getByLabel('Digite APAGAR TUDO para confirmar').fill('APAGAR TUDO');
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Apagar definitivamente' }).click();
+  await page.getByText('Dados de teste apagados.').waitFor();
+  assert.equal(linhas('Usuarios'), 1);
+  assert.equal(env.chamar('login', { usuario: 'maria', senha: 'senha-maria-1' }).ok, false);
+  assert.equal(env.chamar('login', { usuario: 'admin', senha: 'senha-forte-1' }).ok, true);
+  assert.deepEqual(erros, []);
+});

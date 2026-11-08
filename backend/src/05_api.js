@@ -28,6 +28,8 @@ var ACOES = {
   'admin.auditoria.desregistrar': { nivel: 'admin', fn: function (d) { return desregistrarBolao(d); } },
   'admin.conferencia.consultar': { nivel: 'admin', fn: function (d) { return consultarConferencia(d); } },
   'admin.conferencia.historico': { nivel: 'admin', fn: function () { return historicoConferencias(); } },
+  'admin.limpeza.previa':  { nivel: 'admin',   fn: function () { return contagemLimpeza(); } },
+  'admin.limpeza.executar': { nivel: 'admin',  fn: function (d) { return limparTudo(d); } },
   'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
   'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
   'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
@@ -75,7 +77,7 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
-var VERSAO_API = '6';
+var VERSAO_API = '8';
 
 /** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {

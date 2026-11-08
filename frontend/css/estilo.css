@@ -233,3 +233,5 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
 .cartao .campo { margin-bottom: .7rem; }
 .cartao .destaque, .cartao .aviso-reprovado { margin-top: .8rem; }
 .cartao > .botao-link { margin-top: .2rem; }
+
+.perigo-zona { border-color: #e3b5b2; }

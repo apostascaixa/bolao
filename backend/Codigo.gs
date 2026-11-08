@@ -409,7 +409,7 @@ var CFG = {
   SESSAO_MS: 7 * 24 * 3600 * 1000,
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,
-  HASH_ITER_PADRAO: 3000,
+  HASH_ITER_PADRAO: 1500,
   CONVITE_HORAS_PADRAO: 72,
   COTA_ABANDONO_MS: 48 * 3600 * 1000, // cota em rascunho/completa sem atividade por 48h libera a vaga
   IMG_MAX_B64: 300000,  // tamanho máximo da imagem em base64 (cerca de 225 KB)
@@ -600,6 +600,12 @@ function verificarSenha(senha, registro) {
   return comparaConstante(h, p[3]);
 }
 
+/** Quantas iterações o hash guardado usa (formato v1$iteracoes$salt$hash); 0 se o formato for desconhecido. */
+function iteracaoDoHash(registro) {
+  var p = String(registro).split('$');
+  return (p.length === 4 && p[0] === 'v1') ? (parseInt(p[1], 10) || 0) : 0;
+}
+
 function normalizarUsuario(u) {
   return String(u === undefined || u === null ? '' : u).trim().toLowerCase();
 }
@@ -762,6 +768,8 @@ function login(d) {
   }
 
   var ok = verificarSenha(senha, u.hashSenha); // fora do lock
+  // Contas criadas com outra quantidade de iterações são atualizadas no primeiro login certo.
+  var novoHash = (ok && iteracaoDoHash(u.hashSenha) !== iteracoesHash()) ? hashSenha(senha, iteracoesHash()) : null;
 
   return comLock(function () {
     var agora = RELOGIO.agora();
@@ -778,6 +786,7 @@ function login(d) {
     }
     atual.tentativas = 0;
     atual.bloqueadoAte = 0;
+    if (novoHash && atual.hashSenha === u.hashSenha) atual.hashSenha = novoHash;
     atualizar('Usuarios', atual._linha, atual);
     limparSessoesExpiradas(agora);
     var token = criarSessaoInterna(atual.id, agora);
@@ -992,6 +1001,8 @@ var ACOES = {
   'admin.auditoria.desregistrar': { nivel: 'admin', fn: function (d) { return desregistrarBolao(d); } },
   'admin.conferencia.consultar': { nivel: 'admin', fn: function (d) { return consultarConferencia(d); } },
   'admin.conferencia.historico': { nivel: 'admin', fn: function () { return historicoConferencias(); } },
+  'admin.limpeza.previa':  { nivel: 'admin',   fn: function () { return contagemLimpeza(); } },
+  'admin.limpeza.executar': { nivel: 'admin',  fn: function (d) { return limparTudo(d); } },
   'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
   'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
   'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
@@ -1039,7 +1050,7 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
-var VERSAO_API = '6';
+var VERSAO_API = '8';
 
 /** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {
@@ -1903,6 +1914,57 @@ function historicoConferencias() {
   return lerTabela('Conferencias').sort(function (a, b) { return b.criadoEm - a.criadoEm; }).slice(0, 30).map(function (c) {
     var mod = Regras.obterModalidade(c.modalidade);
     return { id: c.id, modalidade: c.modalidade, modalidadeNome: mod ? mod.nome : c.modalidade, concurso: c.concurso, resultado: textoParaNumeros(c.resultado), premiados: c.premiados, criadoEm: c.criadoEm };
+  });
+}
+
+
+// ======================= backend/src/12_limpeza.js =======================
+// ===== Limpeza de dados de teste (apaga bolões e tudo que depende deles) =====
+function contagemLimpeza() {
+  var cotas = lerTabela('Cotas');
+  return {
+    boloes: lerTabela('Boloes').length,
+    cotas: cotas.length,
+    confirmadas: cotas.filter(function (c) { return c.status === 'confirmada'; }).length,
+    aguardando: cotas.filter(function (c) { return c.status === 'aguardando_pagamento'; }).length,
+    jogos: lerTabela('Jogos').length,
+    comprovantes: lerTabela('Auditoria').filter(function (e) { return e.tipo === 'comprovante'; }).length,
+    conferencias: lerTabela('Conferencias').length,
+    participantes: lerTabela('Usuarios').filter(function (u) { return u.papel !== 'admin'; }).length
+  };
+}
+
+function apagarLinhasDaAba(nome) {
+  var sh = aba(nome);
+  var ult = sh.getLastRow();
+  if (ult > 1) sh.deleteRows(2, ult - 1);
+}
+
+/**
+ * Apaga todos os bolões, cotas, jogos, auditoria (com as imagens dos comprovantes) e conferências.
+ * Mantém administradores, PIX, QR, banners e convites ainda não usados.
+ * Com incluirParticipantes, apaga também as contas que não são de administrador.
+ */
+function limparTudo(d) {
+  return comLock(function () {
+    if (d.confirmacao !== 'APAGAR TUDO') throw erroNegocio('Confirmação incorreta. Digite exatamente APAGAR TUDO.');
+    var antes = contagemLimpeza();
+
+    lerTabela('Auditoria').forEach(function (e) { if (e.imagemId) removerImagemInterna(e.imagemId); });
+    ['Jogos', 'Cotas', 'Auditoria', 'Conferencias', 'Boloes'].forEach(apagarLinhasDaAba);
+
+    if (d.incluirParticipantes === true) {
+      var alvo = {};
+      var usuarios = lerTabela('Usuarios').filter(function (u) { return u.papel !== 'admin'; });
+      usuarios.forEach(function (u) { alvo[u.id] = true; });
+      var sessoes = lerTabela('Sessoes').filter(function (s) { return alvo[s.userId]; }).sort(function (a, b) { return b._linha - a._linha; });
+      sessoes.forEach(function (s) { removerLinha('Sessoes', s._linha); });
+      var convites = lerTabela('Convites').filter(function (c) { return c.usadoPor && alvo[c.usadoPor]; }).sort(function (a, b) { return b._linha - a._linha; });
+      convites.forEach(function (c) { removerLinha('Convites', c._linha); });
+      usuarios.sort(function (a, b) { return b._linha - a._linha; }).forEach(function (u) { removerLinha('Usuarios', u._linha); });
+    }
+    console.log('Limpeza de dados de teste: ' + JSON.stringify(antes) + ' (participantes incluídos: ' + (d.incluirParticipantes === true) + ')');
+    return antes;
   });
 }
 

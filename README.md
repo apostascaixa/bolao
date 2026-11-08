@@ -22,6 +22,7 @@ Segredos ficam nas Propriedades do Script do Apps Script.
 ## Recursos
 - Participante: escolha de jogos em volante (salva em lote, em segundo plano), PIX e acompanhamento da aprovação
 - Administrador: bolões, aprovação de pagamentos, **Auditoria** (comprovantes e jogos registrados na lotérica), **Conferência** de resultado por concurso, convites e configurações (PIX, banners, carrossel)
+- Administrador: botão **Limpar dados de teste** (Configurações) apaga bolões e tudo que depende deles, com contagem prévia e frase de confirmação
 - Página pública (`publico.html`): comprovante do grupo por participante aprovado
 
 ## Observação sobre a lotérica

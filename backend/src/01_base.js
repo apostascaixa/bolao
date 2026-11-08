@@ -25,7 +25,7 @@ var CFG = {
   SESSAO_MS: 7 * 24 * 3600 * 1000,
   MAX_TENTATIVAS: 5,
   BLOQUEIO_MS: 10 * 60 * 1000,
-  HASH_ITER_PADRAO: 3000,
+  HASH_ITER_PADRAO: 1500,
   CONVITE_HORAS_PADRAO: 72,
   COTA_ABANDONO_MS: 48 * 3600 * 1000, // cota em rascunho/completa sem atividade por 48h libera a vaga
   IMG_MAX_B64: 300000,  // tamanho máximo da imagem em base64 (cerca de 225 KB)

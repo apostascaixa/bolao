@@ -29,6 +29,12 @@ function verificarSenha(senha, registro) {
   return comparaConstante(h, p[3]);
 }
 
+/** Quantas iterações o hash guardado usa (formato v1$iteracoes$salt$hash); 0 se o formato for desconhecido. */
+function iteracaoDoHash(registro) {
+  var p = String(registro).split('$');
+  return (p.length === 4 && p[0] === 'v1') ? (parseInt(p[1], 10) || 0) : 0;
+}
+
 function normalizarUsuario(u) {
   return String(u === undefined || u === null ? '' : u).trim().toLowerCase();
 }
@@ -191,6 +197,8 @@ function login(d) {
   }
 
   var ok = verificarSenha(senha, u.hashSenha); // fora do lock
+  // Contas criadas com outra quantidade de iterações são atualizadas no primeiro login certo.
+  var novoHash = (ok && iteracaoDoHash(u.hashSenha) !== iteracoesHash()) ? hashSenha(senha, iteracoesHash()) : null;
 
   return comLock(function () {
     var agora = RELOGIO.agora();
@@ -207,6 +215,7 @@ function login(d) {
     }
     atual.tentativas = 0;
     atual.bloqueadoAte = 0;
+    if (novoHash && atual.hashSenha === u.hashSenha) atual.hashSenha = novoHash;
     atualizar('Usuarios', atual._linha, atual);
     limparSessoesExpiradas(agora);
     var token = criarSessaoInterna(atual.id, agora);

@@ -136,6 +136,12 @@
     estado: estado, API: API, U: U, UI: window.BolaoUI, Img: Img,
     executar: function () { return executar.apply(null, arguments); },
     recarregarAdmin: function () { return recarregarAdmin(); },
+    recarregarTudo: async function () {
+      estado.minhasCotas = []; estado.pixInfo = {}; estado.bolaoSel = null; estado.auditoria = [];
+      estado.volante = { sel: [], editando: null };
+      fila.pend = []; fila.erro = ''; fila.cotaId = null;
+      await carregarDados();
+    },
     renderPainel: function () { renderPainel(); },
     atualizarTopo: function () { atualizarTopo(); }
   };

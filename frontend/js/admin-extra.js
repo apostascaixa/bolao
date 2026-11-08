@@ -183,7 +183,45 @@
       h('div', { class: 'acoes' }, h('button', { onclick: function () { ctx.UI.copiar(urlPublica); } }, 'Copiar link'),
         h('a', { class: 'botao-link', href: 'publico.html', target: '_blank', rel: 'noopener' }, 'Abrir')));
 
-    return h('section', {}, h('h2', {}, 'Configurações'), secPix, secTopo, secVel, secBanners, secPublica);
+
+    // zona de perigo: limpar dados de teste
+    var painelPerigo = h('div', {});
+    function abrirLimpeza(ev) {
+      ev.target.disabled = true;
+      ctx.executar(async function () {
+        var c = await API.chamar('admin.limpeza.previa', {});
+        var inFrase = h('input', { name: 'fraseLimpeza', autocomplete: 'off', placeholder: 'APAGAR TUDO' });
+        var inPart = h('input', { type: 'checkbox', name: 'apagarParticipantes' });
+        var erroLimpa = h('p', { class: 'erro-form', role: 'alert' });
+        var btnApagar = h('button', { class: 'perigo', disabled: true, onclick: function (e2) {
+          if (!root.confirm('Última confirmação: apagar ' + c.boloes + ' bolão(ões) e tudo que depende deles? Isso não pode ser desfeito.')) return;
+          erroLimpa.textContent = '';
+          ctx.executar(async function () {
+            await API.chamar('admin.limpeza.executar', { confirmacao: inFrase.value, incluirParticipantes: inPart.checked });
+            await ctx.recarregarTudo();
+            ctx.UI.aviso('Dados de teste apagados.');
+            ctx.renderPainel();
+          }, e2.target, function (m) { erroLimpa.textContent = m; });
+        } }, 'Apagar definitivamente');
+        inFrase.addEventListener('input', function () { btnApagar.disabled = inFrase.value !== 'APAGAR TUDO'; });
+        painelPerigo.replaceChildren(
+          h('div', { class: 'aviso-reprovado', role: 'alert' },
+            h('strong', {}, 'Será apagado: '),
+            c.boloes + ' bolão(ões), ' + c.cotas + ' cota(s) (' + c.confirmadas + ' confirmada(s), ' + c.aguardando + ' aguardando aprovação), ' +
+            c.jogos + ' jogo(s), ' + c.comprovantes + ' comprovante(s) da auditoria e ' + c.conferencias + ' consulta(s) de conferência.'),
+          h('label', { class: 'marcar' }, inPart, ' Apagar também as ' + c.participantes + ' conta(s) de participantes (administradores ficam)'),
+          campo('Digite APAGAR TUDO para confirmar', inFrase), erroLimpa,
+          h('div', { class: 'acoes' }, btnApagar,
+            h('button', { onclick: function () { painelPerigo.replaceChildren(); ev.target.disabled = false; } }, 'Cancelar')));
+      }, null, function () { ev.target.disabled = false; });
+    }
+    var secPerigo = h('section', { class: 'cartao perigo-zona' },
+      h('h3', {}, 'Limpar dados de teste'),
+      h('p', { class: 'sub' }, 'Apaga todos os bolões e o que depende deles: cotas, jogos, comprovantes da auditoria e consultas de conferência. Mantém os administradores, o PIX, o QR Code, os banners e os convites ainda não usados. Não tem como desfazer.'),
+      painelPerigo,
+      h('div', { class: 'acoes' }, h('button', { class: 'perigo', onclick: abrirLimpeza }, 'Limpar dados de teste…')));
+
+    return h('section', {}, h('h2', {}, 'Configurações'), secPix, secTopo, secVel, secBanners, secPublica, secPerigo);
   }
 
 
