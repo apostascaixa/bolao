@@ -27,6 +27,26 @@ function validarLink(l) {
   return l;
 }
 
+// Espaços de propaganda do site (o banner do topo e o carrossel têm telas próprias).
+var SLOT_NOMES = ['navbar', 'lateral', 'rodape'];
+var SLOT_TIPOS = ['', 'imagem', 'codigo'];
+var SLOT_CODIGO_MAX = 6000;
+
+function lerSlots(c, publico) {
+  var out = {};
+  SLOT_NOMES.forEach(function (n) {
+    var p = 'slot.' + n + '.';
+    var tipo = SLOT_TIPOS.indexOf(c[p + 'tipo']) === -1 ? '' : (c[p + 'tipo'] || '');
+    var s = { tipo: tipo, imagemId: c[p + 'imagemId'] || '', link: c[p + 'link'] || '', codigo: c[p + 'codigo'] || '' };
+    if (publico) {
+      // o público só recebe o que está em uso
+      s = { tipo: tipo, imagemId: tipo === 'imagem' ? s.imagemId : '', link: tipo === 'imagem' ? s.link : '', codigo: tipo === 'codigo' ? s.codigo : '' };
+    }
+    out[n] = s;
+  });
+  return out;
+}
+
 function listarBanners(soAtivos) {
   return lerTabela('Banners')
     .filter(function (b) { return !soAtivos || b.ativo === 1; })
@@ -40,6 +60,8 @@ function configParaAdmin() {
     pix: { chave: c['pix.chave'] || '', nome: c['pix.nome'] || '', cidade: c['pix.cidade'] || '', instrucoes: c['pix.instrucoes'] || '', qrImagemId: c['pix.qrImagemId'] || '' },
     topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
     carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    slots: lerSlots(c, false),
+    loterias: { ativo: c['loterias.ativo'] !== '0', apiBase: c['loterias.apiBase'] || '', apiPadrao: LOTERIAS_BASE_PADRAO },
     banners: listarBanners(false)
   };
 }
@@ -50,6 +72,8 @@ function configPublica() {
   return {
     topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
     carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    slots: lerSlots(c, true),
+    loterias: { ativo: c['loterias.ativo'] !== '0' },
     banners: listarBanners(true).map(function (b) { return { id: b.id, imagemId: b.imagemId, titulo: b.titulo, link: b.link }; })
   };
 }
@@ -83,7 +107,32 @@ function salvarConfig(d) {
       }
       if (cr.incluirBoloes !== undefined) pares['carrossel.incluirBoloes'] = cr.incluirBoloes ? '1' : '0';
     }
+    if (d.slots !== undefined) {
+      var sl = d.slots || {};
+      SLOT_NOMES.forEach(function (n) {
+        if (sl[n] === undefined) return;
+        var s = sl[n] || {};
+        var p = 'slot.' + n + '.';
+        if (s.tipo !== undefined) {
+          if (SLOT_TIPOS.indexOf(s.tipo) === -1) throw erroNegocio('Tipo de propaganda inválido.');
+          pares[p + 'tipo'] = s.tipo;
+        }
+        if (s.link !== undefined) pares[p + 'link'] = validarLink(s.link);
+        if (s.codigo !== undefined) {
+          var cod = String(s.codigo === null ? '' : s.codigo).replace(/\r\n/g, '\n');
+          if (cod.length > SLOT_CODIGO_MAX) throw erroNegocio('O código da propaganda passa de ' + SLOT_CODIGO_MAX + ' caracteres.');
+          pares[p + 'codigo'] = cod;
+        }
+      });
+    }
+    var mudouLoterias = false;
+    if (d.loterias !== undefined) {
+      var lo = d.loterias || {};
+      if (lo.ativo !== undefined) { pares['loterias.ativo'] = lo.ativo ? '1' : '0'; mudouLoterias = true; }
+      if (lo.apiBase !== undefined) { pares['loterias.apiBase'] = validarBaseLoterias(lo.apiBase); mudouLoterias = true; }
+    }
     gravarConfig(pares);
+    if (mudouLoterias) limparCacheLoterias();
     return configParaAdmin();
   });
 }

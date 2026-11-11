@@ -24,6 +24,7 @@ Segredos ficam nas Propriedades do Script do Apps Script.
 - Administrador: bolões, aprovação de pagamentos, **Auditoria** (comprovantes e jogos registrados na lotérica), **Conferência** de resultado por concurso, convites e configurações (PIX, banners, carrossel)
 - Administrador: botão **Limpar dados de teste** (Configurações) apaga bolões e tudo que depende deles, com contagem prévia e frase de confirmação
 - Página pública (`publico.html`): comprovante do grupo por participante aprovado
+- Administrador: aba **Propagandas** — resultados das loterias (Mega-Sena, Lotofácil, Quina) com fonte da API configurável e botão de teste, e três espaços de propaganda (faixa abaixo do banner do topo, coluna da direita e rodapé), cada um com imagem + link ou código de anúncio. O código roda dentro de um quadro isolado (iframe com sandbox), sem acesso à página nem ao login. O banner do topo e o carrossel continuam em Configurações.
 
 ## Observação sobre a lotérica
 Os comprovantes da página pública são internos do grupo e não substituem o recibo oficial.

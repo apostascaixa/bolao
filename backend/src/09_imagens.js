@@ -52,9 +52,15 @@ function removerImagemInterna(id) {
   for (var i = linhas.length - 1; i >= 0; i--) removerLinha('Imagens', linhas[i]);
 }
 
+// Onde cada "uso" de imagem fica guardado na Config.
+var USOS_IMG_CONFIG = {
+  qr: 'pix.qrImagemId', topo: 'topo.imagemId',
+  slot_navbar: 'slot.navbar.imagemId', slot_lateral: 'slot.lateral.imagemId', slot_rodape: 'slot.rodape.imagemId'
+};
+
 function idsImagensPermitidas() {
   var c = lerConfig();
-  var ids = [c['topo.imagemId'], c['pix.qrImagemId']];
+  var ids = [c['topo.imagemId'], c['pix.qrImagemId'], c['slot.navbar.imagemId'], c['slot.lateral.imagemId'], c['slot.rodape.imagemId']];
   lerTabela('Banners').forEach(function (b) { ids.push(b.imagemId); });
   lerTabela('Auditoria').forEach(function (e) { ids.push(e.imagemId); });
   return ids.filter(function (x) { return !!x; });
@@ -76,7 +82,7 @@ function enviarImagem(d) {
   return comLock(function () {
     var agora = RELOGIO.agora();
     var uso = d.uso;
-    if (['qr', 'topo', 'banner'].indexOf(uso) === -1) throw erroNegocio('Uso da imagem inválido.');
+    if (uso !== 'banner' && !Object.prototype.hasOwnProperty.call(USOS_IMG_CONFIG, uso)) throw erroNegocio('Uso da imagem inválido.');
     var titulo = limparTexto(d.titulo, 80);
     var link = validarLink(d.link);
     var banners = lerTabela('Banners');
@@ -85,11 +91,15 @@ function enviarImagem(d) {
     var id = salvarImagemInterna(v, agora);
     var c = lerConfig();
 
-    if (uso === 'qr' || uso === 'topo') {
-      var chave = uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+    if (uso !== 'banner') {
+      var chave = USOS_IMG_CONFIG[uso];
       var antiga = c[chave];
       var pares = {};
       pares[chave] = id;
+      if (uso.indexOf('slot_') === 0) { // enviar a imagem liga o espaço em modo imagem e guarda o link
+        pares['slot.' + uso.substring(5) + '.tipo'] = 'imagem';
+        if (d.link !== undefined) pares['slot.' + uso.substring(5) + '.link'] = link;
+      }
       gravarConfig(pares);
       if (antiga) removerImagemInterna(antiga);
       return configParaAdmin();
@@ -102,8 +112,8 @@ function enviarImagem(d) {
 
 function removerImagemUso(d) {
   return comLock(function () {
-    if (['qr', 'topo'].indexOf(d.uso) === -1) throw erroNegocio('Uso da imagem inválido.');
-    var chave = d.uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+    if (!Object.prototype.hasOwnProperty.call(USOS_IMG_CONFIG, d.uso)) throw erroNegocio('Uso da imagem inválido.');
+    var chave = USOS_IMG_CONFIG[d.uso];
     var antiga = lerConfig()[chave];
     var pares = {};
     pares[chave] = '';

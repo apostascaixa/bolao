@@ -8,6 +8,7 @@ var ACOES = {
   'boloes.abertos':        { nivel: 'usuario', fn: function () { return boloesAbertos(); } },
   'publico.config':        { nivel: 'publico', fn: function () { return configPublica(); } },
   'publico.jogos':         { nivel: 'publico', fn: function () { return paginaPublica(); } },
+  'publico.loterias':      { nivel: 'publico', fn: function () { return loteriasPublicas(); } },
   'imagem.obter':          { nivel: 'publico', fn: function (d) { return obterImagem(d); } },
   'jogos.salvarVarios':    { nivel: 'usuario', fn: function (d, u) { return salvarJogosLote(u, d); } },
   'cotas.gerarPix':        { nivel: 'usuario', fn: function (d, u) { return gerarPixCota(u, d); } },
@@ -32,6 +33,7 @@ var ACOES = {
   'admin.limpeza.executar': { nivel: 'admin',  fn: function (d) { return limparTudo(d); } },
   'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
   'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
+  'admin.loterias.testar': { nivel: 'admin',   fn: function (d) { return testarFonteLoterias(d); } },
   'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
   'admin.imagem.remover':  { nivel: 'admin',   fn: function (d) { return removerImagemUso(d); } },
   'admin.banners.atualizar': { nivel: 'admin', fn: function (d) { return atualizarBanner(d); } },
@@ -77,7 +79,7 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
-var VERSAO_API = '8';
+var VERSAO_API = '9';
 
 /** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {

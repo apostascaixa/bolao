@@ -981,6 +981,7 @@ var ACOES = {
   'boloes.abertos':        { nivel: 'usuario', fn: function () { return boloesAbertos(); } },
   'publico.config':        { nivel: 'publico', fn: function () { return configPublica(); } },
   'publico.jogos':         { nivel: 'publico', fn: function () { return paginaPublica(); } },
+  'publico.loterias':      { nivel: 'publico', fn: function () { return loteriasPublicas(); } },
   'imagem.obter':          { nivel: 'publico', fn: function (d) { return obterImagem(d); } },
   'jogos.salvarVarios':    { nivel: 'usuario', fn: function (d, u) { return salvarJogosLote(u, d); } },
   'cotas.gerarPix':        { nivel: 'usuario', fn: function (d, u) { return gerarPixCota(u, d); } },
@@ -1005,6 +1006,7 @@ var ACOES = {
   'admin.limpeza.executar': { nivel: 'admin',  fn: function (d) { return limparTudo(d); } },
   'admin.config.obter':    { nivel: 'admin',   fn: function () { return configParaAdmin(); } },
   'admin.config.salvar':   { nivel: 'admin',   fn: function (d) { return salvarConfig(d); } },
+  'admin.loterias.testar': { nivel: 'admin',   fn: function (d) { return testarFonteLoterias(d); } },
   'admin.imagem.enviar':   { nivel: 'admin',   fn: function (d) { return enviarImagem(d); } },
   'admin.imagem.remover':  { nivel: 'admin',   fn: function (d) { return removerImagemUso(d); } },
   'admin.banners.atualizar': { nivel: 'admin', fn: function (d) { return atualizarBanner(d); } },
@@ -1050,7 +1052,7 @@ function doPost(e) {
   return responder(despachar(corpo));
 }
 
-var VERSAO_API = '8';
+var VERSAO_API = '9';
 
 /** Abrir a URL /exec no navegador mostra a versão do código que está realmente publicada. */
 function doGet() {
@@ -1346,6 +1348,26 @@ function validarLink(l) {
   return l;
 }
 
+// Espaços de propaganda do site (o banner do topo e o carrossel têm telas próprias).
+var SLOT_NOMES = ['navbar', 'lateral', 'rodape'];
+var SLOT_TIPOS = ['', 'imagem', 'codigo'];
+var SLOT_CODIGO_MAX = 6000;
+
+function lerSlots(c, publico) {
+  var out = {};
+  SLOT_NOMES.forEach(function (n) {
+    var p = 'slot.' + n + '.';
+    var tipo = SLOT_TIPOS.indexOf(c[p + 'tipo']) === -1 ? '' : (c[p + 'tipo'] || '');
+    var s = { tipo: tipo, imagemId: c[p + 'imagemId'] || '', link: c[p + 'link'] || '', codigo: c[p + 'codigo'] || '' };
+    if (publico) {
+      // o público só recebe o que está em uso
+      s = { tipo: tipo, imagemId: tipo === 'imagem' ? s.imagemId : '', link: tipo === 'imagem' ? s.link : '', codigo: tipo === 'codigo' ? s.codigo : '' };
+    }
+    out[n] = s;
+  });
+  return out;
+}
+
 function listarBanners(soAtivos) {
   return lerTabela('Banners')
     .filter(function (b) { return !soAtivos || b.ativo === 1; })
@@ -1359,6 +1381,8 @@ function configParaAdmin() {
     pix: { chave: c['pix.chave'] || '', nome: c['pix.nome'] || '', cidade: c['pix.cidade'] || '', instrucoes: c['pix.instrucoes'] || '', qrImagemId: c['pix.qrImagemId'] || '' },
     topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
     carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    slots: lerSlots(c, false),
+    loterias: { ativo: c['loterias.ativo'] !== '0', apiBase: c['loterias.apiBase'] || '', apiPadrao: LOTERIAS_BASE_PADRAO },
     banners: listarBanners(false)
   };
 }
@@ -1369,6 +1393,8 @@ function configPublica() {
   return {
     topo: { imagemId: c['topo.imagemId'] || '', link: c['topo.link'] || '' },
     carrossel: { segundos: segundosCarrossel(c), incluirBoloes: c['carrossel.incluirBoloes'] !== '0' },
+    slots: lerSlots(c, true),
+    loterias: { ativo: c['loterias.ativo'] !== '0' },
     banners: listarBanners(true).map(function (b) { return { id: b.id, imagemId: b.imagemId, titulo: b.titulo, link: b.link }; })
   };
 }
@@ -1402,7 +1428,32 @@ function salvarConfig(d) {
       }
       if (cr.incluirBoloes !== undefined) pares['carrossel.incluirBoloes'] = cr.incluirBoloes ? '1' : '0';
     }
+    if (d.slots !== undefined) {
+      var sl = d.slots || {};
+      SLOT_NOMES.forEach(function (n) {
+        if (sl[n] === undefined) return;
+        var s = sl[n] || {};
+        var p = 'slot.' + n + '.';
+        if (s.tipo !== undefined) {
+          if (SLOT_TIPOS.indexOf(s.tipo) === -1) throw erroNegocio('Tipo de propaganda inválido.');
+          pares[p + 'tipo'] = s.tipo;
+        }
+        if (s.link !== undefined) pares[p + 'link'] = validarLink(s.link);
+        if (s.codigo !== undefined) {
+          var cod = String(s.codigo === null ? '' : s.codigo).replace(/\r\n/g, '\n');
+          if (cod.length > SLOT_CODIGO_MAX) throw erroNegocio('O código da propaganda passa de ' + SLOT_CODIGO_MAX + ' caracteres.');
+          pares[p + 'codigo'] = cod;
+        }
+      });
+    }
+    var mudouLoterias = false;
+    if (d.loterias !== undefined) {
+      var lo = d.loterias || {};
+      if (lo.ativo !== undefined) { pares['loterias.ativo'] = lo.ativo ? '1' : '0'; mudouLoterias = true; }
+      if (lo.apiBase !== undefined) { pares['loterias.apiBase'] = validarBaseLoterias(lo.apiBase); mudouLoterias = true; }
+    }
     gravarConfig(pares);
+    if (mudouLoterias) limparCacheLoterias();
     return configParaAdmin();
   });
 }
@@ -1463,9 +1514,15 @@ function removerImagemInterna(id) {
   for (var i = linhas.length - 1; i >= 0; i--) removerLinha('Imagens', linhas[i]);
 }
 
+// Onde cada "uso" de imagem fica guardado na Config.
+var USOS_IMG_CONFIG = {
+  qr: 'pix.qrImagemId', topo: 'topo.imagemId',
+  slot_navbar: 'slot.navbar.imagemId', slot_lateral: 'slot.lateral.imagemId', slot_rodape: 'slot.rodape.imagemId'
+};
+
 function idsImagensPermitidas() {
   var c = lerConfig();
-  var ids = [c['topo.imagemId'], c['pix.qrImagemId']];
+  var ids = [c['topo.imagemId'], c['pix.qrImagemId'], c['slot.navbar.imagemId'], c['slot.lateral.imagemId'], c['slot.rodape.imagemId']];
   lerTabela('Banners').forEach(function (b) { ids.push(b.imagemId); });
   lerTabela('Auditoria').forEach(function (e) { ids.push(e.imagemId); });
   return ids.filter(function (x) { return !!x; });
@@ -1487,7 +1544,7 @@ function enviarImagem(d) {
   return comLock(function () {
     var agora = RELOGIO.agora();
     var uso = d.uso;
-    if (['qr', 'topo', 'banner'].indexOf(uso) === -1) throw erroNegocio('Uso da imagem inválido.');
+    if (uso !== 'banner' && !Object.prototype.hasOwnProperty.call(USOS_IMG_CONFIG, uso)) throw erroNegocio('Uso da imagem inválido.');
     var titulo = limparTexto(d.titulo, 80);
     var link = validarLink(d.link);
     var banners = lerTabela('Banners');
@@ -1496,11 +1553,15 @@ function enviarImagem(d) {
     var id = salvarImagemInterna(v, agora);
     var c = lerConfig();
 
-    if (uso === 'qr' || uso === 'topo') {
-      var chave = uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+    if (uso !== 'banner') {
+      var chave = USOS_IMG_CONFIG[uso];
       var antiga = c[chave];
       var pares = {};
       pares[chave] = id;
+      if (uso.indexOf('slot_') === 0) { // enviar a imagem liga o espaço em modo imagem e guarda o link
+        pares['slot.' + uso.substring(5) + '.tipo'] = 'imagem';
+        if (d.link !== undefined) pares['slot.' + uso.substring(5) + '.link'] = link;
+      }
       gravarConfig(pares);
       if (antiga) removerImagemInterna(antiga);
       return configParaAdmin();
@@ -1513,8 +1574,8 @@ function enviarImagem(d) {
 
 function removerImagemUso(d) {
   return comLock(function () {
-    if (['qr', 'topo'].indexOf(d.uso) === -1) throw erroNegocio('Uso da imagem inválido.');
-    var chave = d.uso === 'qr' ? 'pix.qrImagemId' : 'topo.imagemId';
+    if (!Object.prototype.hasOwnProperty.call(USOS_IMG_CONFIG, d.uso)) throw erroNegocio('Uso da imagem inválido.');
+    var chave = USOS_IMG_CONFIG[d.uso];
     var antiga = lerConfig()[chave];
     var pares = {};
     pares[chave] = '';
@@ -1965,6 +2026,118 @@ function limparTudo(d) {
     }
     console.log('Limpeza de dados de teste: ' + JSON.stringify(antes) + ' (participantes incluídos: ' + (d.incluirParticipantes === true) + ')');
     return antes;
+  });
+}
+
+
+// ======================= backend/src/13_loterias.js =======================
+// ===== Resultados das loterias (fonte configurável pelo administrador) =====
+var LOTERIAS = [
+  { chave: 'megasena',  nome: 'Mega-Sena' },
+  { chave: 'lotofacil', nome: 'Lotofácil' },
+  { chave: 'quina',     nome: 'Quina' }
+];
+var LOTERIAS_BASE_PADRAO = 'https://servicebus2.caixa.gov.br/portaldeloterias/api/';
+var LOTERIAS_CACHE_CHAVE = 'loterias.v1';
+var LOTERIAS_CACHE_OK_S = 1800;   // resultado completo: 30 minutos
+var LOTERIAS_CACHE_FALHA_S = 120; // algo falhou: tenta de novo em 2 minutos
+
+/** Vazio = fonte padrão. Aceita "{loteria}" no endereço; sem ele, o nome da loteria é colocado no fim. */
+function validarBaseLoterias(u) {
+  u = String(u === undefined || u === null ? '' : u).trim();
+  if (u === '') return '';
+  if (!/^https:\/\/[^\s?#]+$/i.test(u) || u.length > 200) throw erroNegocio('O endereço da fonte deve começar com https:// e não ter espaços, ? ou #.');
+  if (u.indexOf('{loteria}') === -1 && u.charAt(u.length - 1) !== '/') u += '/';
+  return u;
+}
+
+function baseLoteriasDe(c) {
+  return c['loterias.apiBase'] || LOTERIAS_BASE_PADRAO;
+}
+
+function urlLoteria(base, m) {
+  return base.indexOf('{loteria}') !== -1 ? base.replace('{loteria}', m.chave) : base + m.chave;
+}
+
+/** Só aceita o que esperamos: números como número, dezenas como "01".."99", textos curtos. */
+function normalizarLoteria(m, d) {
+  d = d || {};
+  var rateio = d.listaRateioPremio || d.premiacoes || [];
+  var faixa = rateio[0] || {};
+  var bruto = faixa.numeroDeGanhadores !== undefined ? faixa.numeroDeGanhadores
+    : (faixa.ganhadores !== undefined ? faixa.ganhadores : faixa.vencedores);
+  var dezenas = (d.listaDezenas || d.dezenas || []).map(function (x) { return String(x); })
+    .filter(function (x) { return /^\d{1,2}$/.test(x); })
+    .map(function (x) { return x.length === 1 ? '0' + x : x; });
+  return {
+    chave: m.chave,
+    nome: m.nome,
+    concurso: Number(d.numero !== undefined ? d.numero : d.concurso) || 0,
+    data: String(d.dataApuracao || d.data || '').substring(0, 20),
+    dezenas: dezenas,
+    ganhadores: Number(bruto) || 0,
+    acumulou: d.acumulado !== undefined ? !!d.acumulado : !!d.acumulou,
+    proximoPremio: Number(d.valorEstimadoProximoConcurso || d.valorAcumuladoProximoConcurso) || 0,
+    proximoData: String(d.dataProximoConcurso || '').substring(0, 20)
+  };
+}
+
+/** Busca uma loteria na fonte. Lança erro com o motivo se falhar. */
+function buscarUmaLoteria(base, m) {
+  var r = UrlFetchApp.fetch(urlLoteria(base, m), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('HTTP ' + r.getResponseCode());
+  var item = normalizarLoteria(m, JSON.parse(r.getContentText()));
+  if (!item.concurso || item.dezenas.length === 0) throw new Error('resposta sem concurso ou dezenas');
+  return item;
+}
+
+function buscarResultadosLoterias(base) {
+  var p = props();
+  var lista = [];
+  var falhas = [];
+  LOTERIAS.forEach(function (m) {
+    try {
+      var item = buscarUmaLoteria(base, m);
+      lista.push(item);
+      p.setProperty('loterias.ultimo.' + m.chave, JSON.stringify(item));
+    } catch (e) {
+      falhas.push(m.nome + ': ' + (e && e.message ? e.message : e));
+      var ultimo = p.getProperty('loterias.ultimo.' + m.chave); // se a fonte cair, mostra o último resultado bom
+      if (ultimo) lista.push(JSON.parse(ultimo));
+    }
+  });
+  return { lista: lista, falhas: falhas };
+}
+
+/** Público: resultados com cache de 30 minutos (visitantes não derrubam a fonte). */
+function loteriasPublicas() {
+  var c = lerConfig();
+  if (c['loterias.ativo'] === '0') return { ativo: false, loterias: [] };
+  var cache = CacheService.getScriptCache();
+  var guardado = cache.get(LOTERIAS_CACHE_CHAVE);
+  if (guardado) return JSON.parse(guardado);
+  var r = buscarResultadosLoterias(baseLoteriasDe(c));
+  var saida = { ativo: true, atualizadoEm: RELOGIO.agora(), loterias: r.lista };
+  if (r.falhas.length > 0) console.error('Loterias: ' + r.falhas.join(' | '));
+  cache.put(LOTERIAS_CACHE_CHAVE, JSON.stringify(saida), r.falhas.length > 0 ? LOTERIAS_CACHE_FALHA_S : LOTERIAS_CACHE_OK_S);
+  return saida;
+}
+
+function limparCacheLoterias() {
+  CacheService.getScriptCache().remove(LOTERIAS_CACHE_CHAVE);
+}
+
+/** Admin: testa uma fonte (a digitada ou a salva) sem usar o cache e sem gravar nada. */
+function testarFonteLoterias(d) {
+  var digitada = validarBaseLoterias(d.apiBase);
+  var base = digitada || baseLoteriasDe(lerConfig());
+  return LOTERIAS.map(function (m) {
+    try {
+      var i = buscarUmaLoteria(base, m);
+      return { chave: m.chave, nome: m.nome, ok: true, concurso: i.concurso, dezenas: i.dezenas.length, ganhadores: i.ganhadores, acumulou: i.acumulou };
+    } catch (e) {
+      return { chave: m.chave, nome: m.nome, ok: false, erro: String(e && e.message ? e.message : e).substring(0, 120) };
+    }
   });
 }
 

@@ -623,7 +623,7 @@ test('nenhuma operação de cota deixa o lock preso', () => {
 test('doGet informa a versão publicada e conhece as ações da etapa 4', () => {
   const env = preparar();
   const r = JSON.parse(env.ctx.doGet().getContent());
-  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '8' });
+  assert.deepEqual(r, { ok: true, servico: 'bolao-api', versao: '9' });
   for (const a of ['cotas.minhas', 'cotas.criar', 'cotas.cancelar', 'jogos.salvar', 'jogos.remover']) {
     assert.ok(Object.prototype.hasOwnProperty.call(env.ctx.ACOES, a), a);
   }

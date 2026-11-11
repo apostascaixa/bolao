@@ -67,6 +67,9 @@ function novoAmbiente() {
   const erros = [];
   let travado = false;
   let travasTotais = 0;
+  const cache = new Map();
+  const fetchLog = [];
+  const rotasFetch = {}; // url -> { codigo, corpo } ou função(url) que devolve isso
 
   const sandbox = {
     console: { log() {}, error: (m) => erros.push(String(m)) },
@@ -91,6 +94,16 @@ function novoAmbiente() {
       MimeType: { JSON: 'JSON' },
       createTextOutput: (t) => ({ getContent: () => t, setMimeType() { return this; } })
     },
+    CacheService: { getScriptCache: () => ({ get: (k) => (cache.has(k) ? cache.get(k) : null), put: (k, v) => { cache.set(k, String(v)); }, remove: (k) => { cache.delete(k); } }) },
+    UrlFetchApp: {
+      fetch: (url) => {
+        fetchLog.push(url);
+        let r = rotasFetch[url];
+        if (typeof r === 'function') r = r(url);
+        if (!r) r = { codigo: 404, corpo: '' };
+        return { getResponseCode: () => r.codigo, getContentText: () => (typeof r.corpo === 'string' ? r.corpo : JSON.stringify(r.corpo)) };
+      }
+    },
     Logger: { log: (m) => logs.push(String(m)) },
     Date
   };
@@ -99,7 +112,7 @@ function novoAmbiente() {
   vm.runInContext(codigo, ctx);
 
   const chamar = (acao, dados) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ acao, ...dados }) } }).getContent());
-  return { ctx, ss, propriedades, logs, erros, chamar, travas: () => travasTotais, estaTravado: () => travado };
+  return { ctx, ss, propriedades, logs, erros, chamar, cache, fetchLog, rotasFetch, travas: () => travasTotais, estaTravado: () => travado };
 }
 
 module.exports = { novoAmbiente };

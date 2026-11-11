@@ -5,10 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jogos confirmados – Bolão da Sorte</title>
   <link rel="stylesheet" href="css/estilo.css">
+  <link rel="stylesheet" href="css/slots.css">
 </head>
 <body>
   <div id="topo-site"></div>
-  <div id="app"><p class="carregando">Carregando…</p></div>
+  <nav class="faixa-resumo" id="faixa-resumo" hidden></nav>
+  <div class="slot-navbar" id="slot-navbar" hidden></div>
+
+  <div class="layout-site" id="layout-site">
+    <aside class="lado esq" id="slot-resultados" aria-label="Últimos resultados" hidden></aside>
+    <div id="app"><p class="carregando">Carregando…</p></div>
+    <aside class="lado dir" id="slot-lateral" aria-label="Publicidade" hidden></aside>
+  </div>
+
+  <footer class="slot-rodape" id="slot-rodape" hidden></footer>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="config.js"></script>
   <script src="js/util.js"></script>
@@ -16,6 +26,8 @@
   <script src="js/ui.js"></script>
   <script src="js/imagens.js"></script>
   <script src="js/carrossel.js"></script>
+  <script src="js/slots.js"></script>
+  <script src="js/loterias.js"></script>
   <script src="js/publico.js"></script>
 </body>
 </html>

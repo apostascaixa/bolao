@@ -58,7 +58,7 @@
 
     function aplicar(nova) {
       ctx.estado.cfg = nova;
-      ctx.estado.pub = { topo: nova.topo, carrossel: nova.carrossel, banners: nova.banners.filter(function (b) { return b.ativo; }) };
+      ctx.estado.pub = { topo: nova.topo, carrossel: nova.carrossel, slots: nova.slots, loterias: { ativo: nova.loterias.ativo }, banners: nova.banners.filter(function (b) { return b.ativo; }) };
       ctx.atualizarTopo();
     }
     function salvar(corpo, msg, botao, aoErro) {

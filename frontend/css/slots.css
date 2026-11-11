@@ -1,0 +1,35 @@
+/* Espaços de propaganda, faixa rotativa e resultados das loterias. */
+textarea.codigo { text-align: left; }
+.faixa-resumo { background: #0b3d2e; color: #fff; text-align: center; font-weight: 700; padding: .55rem 1rem; }
+.faixa-resumo[hidden], .slot-navbar[hidden], .slot-rodape[hidden], .lado[hidden] { display: none !important; }
+
+.slot-navbar, .slot-rodape { max-width: 70rem; margin: .75rem auto; padding: 0 1rem; text-align: center; }
+.slot-img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 10px; opacity: 0; transition: opacity .3s; }
+.slot-img.carregada { opacity: 1; }
+.slot-quadro { display: block; width: 100%; border: 0; height: 90px; }
+
+.layout-site { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; padding: 0 .5rem; }
+.layout-site.tem-esq { grid-template-columns: 14.5rem minmax(0, 1fr); }
+.layout-site.tem-dir { grid-template-columns: minmax(0, 1fr) 14.5rem; }
+.layout-site.tem-esq.tem-dir { grid-template-columns: 14.5rem minmax(0, 1fr) 14.5rem; }
+.lado { position: sticky; top: .75rem; align-self: start; padding-top: 1rem; }
+.lado-titulo { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--suave); margin: 0 0 .5rem; }
+
+.lot-card { border-radius: 12px; padding: .8rem; margin-bottom: .8rem; color: #fff; background: var(--cor, #1b6b3a); }
+.lot-megasena { --cor: #209869; }
+.lot-lotofacil { --cor: #930089; }
+.lot-quina { --cor: #260085; }
+.lot-card h3 { margin: 0; font-size: 1rem; }
+.lot-card small { display: block; opacity: .9; }
+.lot-bolas { display: flex; flex-wrap: wrap; gap: 4px; margin: .6rem 0; }
+.lot-bola { width: 1.75rem; height: 1.75rem; border-radius: 50%; background: #fff; color: #222; font-weight: 700; font-size: .78rem; display: grid; place-items: center; }
+.lot-status { font-weight: 700; }
+
+@media (max-width: 1100px) {
+  .layout-site, .layout-site.tem-esq, .layout-site.tem-dir, .layout-site.tem-esq.tem-dir { grid-template-columns: minmax(0, 1fr); }
+  .lado { position: static; padding-top: .5rem; }
+  .lado.esq { display: flex; gap: .6rem; overflow-x: auto; }
+  .lado.esq .lot-card { flex: 0 0 15rem; margin-bottom: 0; }
+  .lado.esq .lado-titulo { display: none; }
+  .lado.dir { max-width: 22rem; margin: 0 auto; width: 100%; }
+}

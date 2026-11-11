@@ -13,6 +13,7 @@
     alvo.replaceChildren();
     var el = estado.pub ? Car.topo(estado.pub.topo) : null;
     if (el) alvo.appendChild(el);
+    if (window.BolaoSlots) window.BolaoSlots.aplicar(estado.pub);
   }
 
   function cartaoBolao(b) {

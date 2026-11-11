@@ -4,8 +4,8 @@
   "private": true,
   "description": "Organizador de bolão (Google Planilhas, Drive e Netlify)",
   "scripts": {
-    "test": "node --test tests/shared.test.js tests/conferencia.test.js tests/backend.test.js tests/frontend-util.test.js",
-    "test:e2e": "node --test tests/e2e.test.js",
+    "test": "node --test tests/shared.test.js tests/conferencia.test.js tests/backend.test.js tests/propagandas.test.js tests/frontend-util.test.js",
+    "test:e2e": "node --test tests/e2e.test.js tests/e2e-propagandas.test.js",
     "build": "node scripts/build-backend.js"
   }
 }
