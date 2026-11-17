@@ -7,6 +7,8 @@
   'use strict';
   var UI = window.BolaoUI, U = window.BolaoUtil, API = window.BolaoApi;
   if (!UI || !U || !API) return;
+  if (window.__publicoExtras) return; // já carregado (por exemplo, pela linha no HTML e também pelo carregador)
+  window.__publicoExtras = true;
   var h = UI.h;
   var CFG = window.BOLAO_CONFIG || {};
   // Padrão; o que o administrador salvar (Configurações) vale mais. Também dá para definir CONTAGEM no config.js.
