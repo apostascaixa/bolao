@@ -201,13 +201,14 @@
     var admin = estado.usuario.papel === 'admin';
     var pendentes = estado.cotasAdmin.filter(function (c) { return c.status === 'aguardando_pagamento'; }).length;
     var abas = admin
-      ? [['boloes', 'Administrar bolões'], ['aprovacoes', 'Aprovações' + (pendentes ? ' (' + pendentes + ')' : '')], ['auditoria', 'Auditoria'], ['conferencia', 'Conferência'], ['convites', 'Convites'], ['propagandas', 'Propagandas'], ['config', 'Configurações'], ['participar', 'Participar']]
+      ? [['boloes', 'Administrar bolões'], ['aprovacoes', 'Aprovações' + (pendentes ? ' (' + pendentes + ')' : '')], ['auditoria', 'Auditoria'], ['conferencia', 'Conferência'], ['convites', 'Convites'], ['usuarios', 'Usuários'], ['propagandas', 'Propagandas'], ['config', 'Configurações'], ['participar', 'Participar']]
       : [];
     var conteudo;
     if (admin && estado.aba === 'convites') conteudo = telaConvites();
     else if (admin && estado.aba === 'boloes') conteudo = telaBoloesAdmin();
     else if (admin && estado.aba === 'aprovacoes') conteudo = window.BolaoAdmin.telaAprovacoes(ctxAdmin);
     else if (admin && estado.aba === 'config') conteudo = window.BolaoAdmin.telaConfig(ctxAdmin);
+    else if (admin && estado.aba === 'usuarios') conteudo = window.BolaoAdmin.telaUsuarios(ctxAdmin);
     else if (admin && estado.aba === 'propagandas') conteudo = window.BolaoAdmin.telaPropagandas(ctxAdmin);
     else if (admin && estado.aba === 'auditoria') conteudo = window.BolaoAdmin.telaAuditoria(ctxAdmin);
     else if (admin && estado.aba === 'conferencia') conteudo = window.BolaoAdmin.telaConferencia(ctxAdmin);

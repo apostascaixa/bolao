@@ -25,10 +25,10 @@
     var prox = brl(l.proximoPremio);
     return h('article', { class: 'lot-card lot-' + String(l.chave).replace(/[^a-z]/g, '') },
       h('h3', {}, l.nome),
-      h('small', {}, 'Concurso ' + l.concurso + (l.data ? ' · ' + l.data : '')),
+      h('small', {}, 'Conc. ' + l.concurso + (l.data ? ' · ' + (/^\d{2}\/\d{2}\/\d{4}/.test(String(l.data)) ? String(l.data).substring(0, 5) : l.data) : '')),
       h('div', { class: 'lot-bolas' }, l.dezenas.map(function (n) { return h('span', { class: 'lot-bola' }, n); })),
       h('div', { class: 'lot-status' }, textoGanhadores(l)),
-      prox ? h('small', {}, 'Próximo' + (l.proximoData ? ' (' + l.proximoData + ')' : '') + ': ' + prox) : null);
+      prox ? h('small', {}, 'Próx.: ' + prox) : null);
   }
 
   function pararResumo() { if (timerResumo) { clearInterval(timerResumo); timerResumo = null; } }
