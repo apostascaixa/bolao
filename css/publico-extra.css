@@ -1,0 +1,14 @@
+/* Página pública: resumo dos bilhetes */
+.resumo { margin: 1rem 0; }
+.resumo h2 { margin-bottom: .6rem; }
+.resumo-totais { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+.resumo-total { flex: 1 1 6rem; background: #fff; border: 1px solid var(--borda); border-radius: 10px; padding: .6rem .8rem; text-align: center; }
+.resumo-total strong { display: block; font-size: 1.6rem; color: var(--verde-esc); }
+.resumo-total span { font-size: .7rem; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+.tabela-rolagem { overflow-x: auto; background: #fff; border: 1px solid var(--borda); border-radius: 10px; }
+.tabela-bilhetes { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 34rem; }
+.tabela-bilhetes th { text-align: left; background: #eef3f0; padding: .5rem .6rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); }
+.tabela-bilhetes td { padding: .5rem .6rem; border-top: 1px solid var(--borda); }
+.linha-bilhete { cursor: pointer; }
+.linha-bilhete:hover, .linha-bilhete:focus-visible { background: #f2f8f4; outline: none; }
+.cel-codigo { font-family: ui-monospace, "Courier New", Consolas, monospace; font-size: .8rem; }
